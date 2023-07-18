@@ -10,41 +10,54 @@
 ;; @todo Test type checker failures
 
 (def test-env
-  {'clojure.lang.Numbers/inc
-   {:type   :=>
-    :input  {:type     :cat
-             :children [{:type 'int?}]}
-    :output {:type 'int?}}
+  (let [inc-type {:type :scheme
+                  :s-vars [{:sym 'a, :typeclasses [:number]}]
+                  :body {:type :=>
+                         :input {:type :cat
+                                 :children [{:type :s-var, :sym 'a}]}
+                         :output {:type :s-var, :sym 'a}}}
+        add-type {:type :scheme
+                  :s-vars [{:sym 'a, :typeclasses [:number]}]
+                  :body {:type :=>
+                         :input {:type :cat
+                                 :children [{:type :s-var, :sym 'a} {:type :s-var, :sym 'a}]}
+                         :output {:type :s-var, :sym 'a}}}]
+    {'clojure.lang.Numbers/inc
+     inc-type
 
-   'clojure.core/inc
-   {:type   :=>
-    :input  {:type     :cat
-             :children [{:type 'int?}]}
-    :output {:type 'int?}}
+     'clojure.core/inc
+     inc-type
 
-   'clojure.core/if
-   {:type   :scheme
-    :s-vars [{:sym 'a}]
-    :body   {:type   :=>
-             :input  {:type     :cat
-                      :children [{:type 'boolean?}
-                                 {:type :s-var :sym 'a}
-                                 {:type :s-var :sym 'a}]}
-             :output {:type :s-var :sym 'a}}}
+     'clojure.core/+
+     add-type
 
-   'clojure.core/map
-   {:type   :scheme
-    :s-vars [{:sym 'a} {:sym 'b}]
-    :body   {:type   :=>
-             :input  {:type     :cat
-                      :children [{:type   :=>
-                                  :input  {:type     :cat
-                                           :children [{:type :s-var :sym 'a}]}
-                                  :output {:type :s-var :sym 'b}}
-                                 {:type  :vector
-                                  :child {:type :s-var :sym 'a}}]}
-             :output {:type  :vector
-                      :child {:type :s-var :sym 'b}}}}})
+     'clojure.lang.Numbers/add
+     add-type
+
+
+     'clojure.core/if
+     {:type   :scheme
+      :s-vars [{:sym 'a}]
+      :body   {:type   :=>
+               :input  {:type     :cat
+                        :children [{:type 'boolean?}
+                                   {:type :s-var :sym 'a}
+                                   {:type :s-var :sym 'a}]}
+               :output {:type :s-var :sym 'a}}}
+
+     'clojure.core/map
+     {:type   :scheme
+      :s-vars [{:sym 'a} {:sym 'b}]
+      :body   {:type   :=>
+               :input  {:type     :cat
+                        :children [{:type   :=>
+                                    :input  {:type     :cat
+                                             :children [{:type :s-var :sym 'a}]}
+                                    :output {:type :s-var :sym 'b}}
+                                   {:type  :vector
+                                    :child {:type :s-var :sym 'a}}]}
+               :output {:type  :vector
+                        :child {:type :s-var :sym 'b}}}}}))
 
 (deftest algo-w-const-test
   (is (= (algo-w (ana/analyze :a) test-env)
@@ -57,30 +70,90 @@
           ::a/schema {:type 'int?}})))
 
 (deftest algo-w-fn-test
-  (let [{::a/keys [subs schema failure]}
-        (algo-w (ana/analyze '(fn [x] (inc x))) test-env)]
-    (is (nil? failure))
-    (is (= schema {:type   :=>
-                   :input  {:type     :cat
-                            :children [{:type 'int?}]}
-                   :output {:type 'int?}}))
-    (is (= (count subs) 2)))
-  (let [{::a/keys [subs schema failure]}
-        (algo-w (ana/analyze `(fn [x#] (f (inc x#) 1)))
-                (assoc test-env
-                  `f {:type   :scheme
-                      :s-vars [{:sym 'a}]
-                      :body   {:type   :=>
-                               :input  {:type     :cat
-                                        :children [{:type :s-var :sym 'a}
-                                                   {:type :s-var :sym 'a}]}
-                               :output {:type :s-var :sym 'a}}}))]
-    (is (nil? failure))
-    (is (= schema {:type   :=>
-                   :input  {:type     :cat
-                            :children [{:type 'int?}]}
-                   :output {:type 'int?}}))
-    (is (= (count subs) 4)))
+  (testing "inc test"
+    (let [{::a/keys [subs schema failure]}
+          (algo-w (ana/analyze '(fn [x] (inc x))) test-env)]
+      (is (nil? failure))
+      (is (= schema {:type :=>
+                     :input {:type :cat
+                             :children [{:type :s-var, :sym 's-148872, :typeclasses [:number]}]}
+                     :output {:type :s-var, :sym 's-148872, :typeclasses [:number]}}))
+      (is (= (count subs) 2)))
+    (let [{::a/keys [subs schema failure]}
+          (algo-w (ana/analyze '(fn [] (inc 1))) test-env)]
+      (is (nil? failure))
+      (is (= schema {:type :=>
+                     :input {:type :cat
+                             :children []}
+                     :output {:type 'int?}}))
+      (is (= (count subs) 1))) ;; maybe 1??
+    (let [{::a/keys [subs schema failure]}
+          (algo-w (ana/analyze '(fn [] (inc 1.5))) test-env)]
+      (is (nil? failure))
+      (is (= schema {:type :=>
+                     :input {:type :cat
+                             :children []}
+                     :output {:type 'double?}}))
+      (is (= (count subs) 1))) ;; maybe 1??
+    (let [{::a/keys [subs schema failure]}
+          (algo-w (ana/analyze '(fn [] (inc "hi there"))) test-env)]
+      (is (= failure
+             {:unification-failure {:mgu-failure :typeclass-failure
+                                    :schema      {:type 'string?}
+                                    :typeclass   :number}}))
+      (is (nil? schema))
+      (is (nil? subs)))
+    (let [{::a/keys [subs schema failure]}
+          (algo-w (ana/analyze `(fn [x#] (f (inc x#) 1)))
+                  (assoc test-env
+                         `f {:type   :scheme
+                             :s-vars [{:sym 'a}]
+                             :body   {:type   :=>
+                                      :input  {:type     :cat
+                                               :children [{:type :s-var :sym 'a}
+                                                          {:type :s-var :sym 'a}]}
+                                      :output {:type :s-var :sym 'a}}}))]
+      (is (nil? failure))
+      (is (= schema {:type   :=>
+                     :input  {:type     :cat
+                              :children [{:type 'int?}]}
+                     :output {:type 'int?}}))
+      (is (= (count subs) 4))))
+  (testing "add test"
+    (let [{::a/keys [subs schema failure]}
+          (algo-w (ana/analyze '(fn [x y] (+ x y))) test-env)]
+      (is (nil? failure))
+      (is (= schema {:type :=>
+                     :input {:type :cat
+                             :children [{:type :s-var, :sym 's-148872, :typeclasses [:number]}
+                                        {:type :s-var, :sym 's-148872, :typeclasses [:number]}]} ;; should these be the same gen-sym?
+                     :output {:type :s-var, :sym 's-148872, :typeclasses [:number]}}))
+      (is (= (count subs) 2))) ;; should this be 2?
+    (let [{::a/keys [subs schema failure]}
+          (algo-w (ana/analyze '(fn [] (+ 1 2))) test-env)]
+      (is (nil? failure))
+      (is (= schema {:type :=>
+                     :input {:type :cat
+                             :children []}
+                     :output {:type 'int?}}))
+      (is (= (count subs) 1))) ;; maybe 1??
+    (let [{::a/keys [subs schema failure]}
+          (algo-w (ana/analyze '(fn [] (+ 1.5 2.73))) test-env)]
+      (is (nil? failure))
+      (is (= schema {:type :=>
+                     :input {:type :cat
+                             :children []}
+                     :output {:type 'double?}}))
+      (is (= (count subs) 1))) ;; maybe 1??
+    (let [{::a/keys [subs schema failure]}
+          (algo-w (ana/analyze '(fn [x] (+ 1.5 x))) test-env)]
+      (is (nil? failure))
+      (is (= schema {:type :=>
+                     :input {:type :cat
+                             :children [{:type 'double?}]}
+                     :output {:type 'double?}}))
+      (is (= (count subs) 1))) ;; maybe 1??
+    )
   (testing "nullary"
     (let [{::a/keys [subs schema failure]}
           (algo-w (ana/analyze `((fn [] 1))) {})]
@@ -91,13 +164,13 @@
     (let [{::a/keys [subs schema failure]}
           (algo-w (ana/analyze `(fn [x# y#] (f x# y#)))
                   (assoc test-env
-                    `f {:type   :scheme
-                        :s-vars [{:sym 'a} {:sym 'b}]
-                        :body   {:type   :=>
-                                 :input  {:type     :cat
-                                          :children [{:type :s-var :sym 'a}
-                                                     {:type :s-var :sym 'b}]}
-                                 :output {:type :s-var :sym 'b}}}))
+                         `f {:type   :scheme
+                             :s-vars [{:sym 'a} {:sym 'b}]
+                             :body   {:type   :=>
+                                      :input  {:type     :cat
+                                               :children [{:type :s-var :sym 'a}
+                                                          {:type :s-var :sym 'b}]}
+                                      :output {:type :s-var :sym 'b}}}))
           inputs (set (get-in schema [:input :children]))
           output (:output schema)]
       (is (nil? failure))

@@ -24,6 +24,8 @@
            (x->y {:type :s-var :sym 'x})))
     (is (= {:type :s-var :sym 'z}
            (x->y {:type :s-var :sym 'z})))
+    (is (= {:type :s-var :sym 'y :typeclasses [:number]}
+           (x->y {:type :s-var :sym 'x :typeclasses [:number]})))
     (testing "tuple schema"
       (is (= {:type :tuple :children [{:type :s-var :sym 'y} {:type :s-var :sym 'y}]}
              (x->y {:type :tuple :children [{:type :s-var :sym 'x} {:type :s-var :sym 'x}]}))))
@@ -35,7 +37,35 @@
              (x->y {:type   :=>
                     :input  {:type     :cat
                              :children [{:type :s-var :sym 'x}]}
-                    :output {:type :s-var :sym 'x}}))))
+                    :output {:type :s-var :sym 'x}})))
+      (is (= {:type   :=>
+              :input  {:type     :cat
+                       :children [{:type :s-var :sym 'y}]}
+              :output {:type :s-var :sym 'z}}
+             (x->y {:type   :=>
+                    :input  {:type     :cat
+                             :children [{:type :s-var :sym 'x}]}
+                    :output {:type :s-var :sym 'z}})))
+      (is (= {:type   :=>
+              :input  {:type     :cat
+                       :children [{:type :s-var :sym 'y} {:type :s-var :sym 't}]}
+              :output {:type :s-var :sym 'y}}
+             (u/substitute {'x {:type :s-var :sym 'y}
+                            'w {:type :s-var :sym 'y}}
+                           {:type   :=>
+                            :input  {:type     :cat
+                                     :children [{:type :s-var :sym 'x} {:type :s-var :sym 't}]}
+                            :output {:type :s-var :sym 'w}})))
+      (is (= {:type   :=>
+              :input  {:type     :cat
+                       :children [{:type :s-var :sym 'y} {:type :s-var :sym 't}]}
+              :output {:type :s-var :sym 'u}}
+             (u/substitute {'x {:type :s-var :sym 'y}
+                            'w {:type :s-var :sym 'u}}
+                           {:type   :=>
+                            :input  {:type     :cat
+                                     :children [{:type :s-var :sym 'x} {:type :s-var :sym 't}]}
+                            :output {:type :s-var :sym 'w}}))))
     (testing "scheme"
       (is (= {:type   :scheme
               :s-vars [{:sym 'z}]
@@ -49,6 +79,20 @@
               :body   {:type :s-var :sym 'x}}
              (x->y {:type   :scheme
                     :s-vars [{:sym 'x}]
+                    :body   {:type :s-var :sym 'x}}))))
+    (testing "typeclasses"
+      (is (= {:type   :scheme
+              :s-vars [{:sym 'z :typeclasses [:number]}]
+              :body   {:type :s-var :sym 'y}}
+             (x->y {:type   :scheme
+                    :s-vars [{:sym 'z :typeclasses [:number]}]
+                    :body   {:type :s-var :sym 'x}})))
+          ;; Occurs check
+      (is (= {:type   :scheme
+              :s-vars [{:sym 'x :typeclasses [:number]}]
+              :body   {:type :s-var :sym 'x}}
+             (x->y {:type   :scheme
+                    :s-vars [{:sym 'x :typeclasses [:number]}]
                     :body   {:type :s-var :sym 'x}}))))))
 
 (deftest substitute-env-test
