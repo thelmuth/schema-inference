@@ -8,6 +8,12 @@
   (algo-w/infer-schema ast env))
 
 (defn concretize
+  "Takes a map of bindings (type variable substitutions) and a schema
+  (potentially a scheme with quantified type variables).
+  Returns a new schema where the type variables in the input schema
+  have been replaced according to the bindings.
+  If the input schema is a scheme, it first processes the body of the scheme.
+  The resulting schema is then generalized."
   [bindings {:keys [type] :as schema}]
   (let [schema (if (= type :scheme) (:body schema) schema)]
     (->> schema
