@@ -70,7 +70,8 @@
   "Free variables in a scheme (:scheme) are those in its body,
   excluding the scheme's own quantified variables (:s-vars)."
   [{:keys [s-vars body]}]
-  (set/difference (free-type-vars body) (set s-vars)))
+  (set/difference (free-type-vars body)
+                  (set (map :sym s-vars))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -158,7 +159,9 @@
   This prevents accidental substitution of locally bound type variables
   if they happen to have the same symbols as free variables in `subs`."
   [subs {:keys [s-vars body] :as scheme}]
-  (assoc scheme :body (substitute (apply dissoc subs s-vars) body)))
+  (assoc scheme
+    :body (substitute (apply dissoc subs (map :sym s-vars))
+                      body)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -198,7 +201,7 @@
   This effectively creates a fresh copy of the scheme's body with new variables."
   [{:keys [s-vars body]}]
   (let [fresh-vars (repeatedly (count s-vars) (fn [] {:type :s-var :sym (gensym "s-")}))
-        subs (zipmap s-vars fresh-vars)]
+        subs (zipmap (map :sym s-vars) fresh-vars)]
     (substitute subs body)))
 
 (defmethod instantiate :default
@@ -218,11 +221,11 @@
   original schema without creating a scheme."
   [env schema]
   (let [schema (instantiate schema)
-        s-vars (set/difference (free-type-vars schema) (free-type-vars-env env))]
+        s-vars (sort (set/difference (free-type-vars schema) (free-type-vars-env env)))]
     (if (empty? s-vars)
       schema
       {:type   :scheme
-       :s-vars (vec (sort s-vars))
+       :s-vars (vec (map (fn [sym] {:sym sym}) s-vars))
        :body   schema})))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
