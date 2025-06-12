@@ -403,20 +403,33 @@
             env {'id-nc id-num-comparable-schema}
             inferred-f-type (schema-inf/infer-schema let-f-ast env)]
 
-        (is (= :scheme (:type inferred-f-type)))
-        (is (= 1 (count (:s-vars inferred-f-type))))
-        (let [s-var-in-f (first (:s-vars inferred-f-type))]
+        (is (= :=> (:type inferred-f-type)))
+        ;; for input
+        (let [typeclasses (-> inferred-f-type :input :children first :typeclasses)]
           ;; The symbol might be different due to generalization, check only typeclasses
-          (is (= (set [:number :comparable]) (set (:typeclasses s-var-in-f)))))
+          (is (= (set [:number :comparable]) (set typeclasses))))
+        (is (= :cat (-> inferred-f-type :input :type)))
+        (is (= :s-var (-> inferred-f-type :input :children first :type)))
+        ;; for output
+        (let [typeclasses (-> inferred-f-type :output :typeclasses)]
+          ;; The symbol might be different due to generalization, check only typeclasses
+          (is (= (set [:number :comparable]) (set typeclasses))))
 
         ;; Test application of f (which is id-num-comparable)
         (let [app-env (assoc {} 'f inferred-f-type)
               app-int-ast {:op :APP :fn {:op :VAR :sym 'f} :args [{:op :LIT :type :int :val 1}]}
+              app-double-ast {:op :APP :fn {:op :VAR :sym 'f} :args [{:op :LIT :type :double :val 1.5}]}
               app-bool-ast {:op :APP :fn {:op :VAR :sym 'f} :args [{:op :LIT :type :boolean :val true}]}
               app-vec-ast {:op :APP :fn {:op :VAR :sym 'f} :args [{:op :LIT :type :vector :val []}]}]
 
           (is (= {:type 'int?} (schema-inf/infer-schema app-int-ast app-env)))
-          (is (= {:type 'boolean?} (schema-inf/infer-schema app-bool-ast app-env)))
+          (is (= {:type 'double?} (schema-inf/infer-schema app-double-ast app-env)))
+
+          ;; This should throw exception because booleans aren't in :number typeclass
+          (is (thrown-with-msg?
+               clojure.lang.ExceptionInfo
+               #"Schema inference failure."
+               (schema-inf/infer-schema app-bool-ast app-env)))
 
           (is (thrown-with-msg?
                clojure.lang.ExceptionInfo

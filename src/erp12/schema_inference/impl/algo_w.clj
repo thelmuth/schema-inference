@@ -8,7 +8,7 @@
 (defmulti algo-w
   "Core of the schema inference algorithm (Algorithm W).
   Dispatches on the :op of the AST node."
-  (fn [{:keys [op]} _env] op)) ; Dispatch only on op and env
+  (fn [{:keys [op]} & _] op)) ; Dispatch only on op and env
 
 (defn- algo-w-failure?
   [x]
@@ -78,7 +78,7 @@
                              {:type   :=>
                               :input  {:type     :cat
                                        :children (mapv ::schema args-ti)}
-                              :output s-var})] ; Removed defined-typeclasses from mgu call
+                              :output s-var})]
             (if (u/mgu-failure? subs')
               {::failure {:unification-failure subs'}}
               {::subs   (u/compose-substitutions subs' subs)

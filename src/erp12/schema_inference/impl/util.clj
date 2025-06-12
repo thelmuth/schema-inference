@@ -273,7 +273,7 @@
     (if (empty? sorted-s-var-defs)
       schema-instance
       {:type   :scheme
-       :s-vars sorted-s-var-defs
+       :s-vars (map #(dissoc % :type) sorted-s-var-defs)
        :body   schema-instance})))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
