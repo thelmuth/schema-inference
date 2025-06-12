@@ -280,7 +280,7 @@
 
 (defn satisfies-all-typeclasses?
   "Checks if a given schema satisfies a collection of typeclass keywords.
-  - schema: The schema to check (e.g., {'type 'int?} or {:type :s-var ...}).
+  - schema: The schema to check (e.g., {:type 'int?} or {:type :s-var ...}).
   - typeclass-keywords: A collection of keywords (e.g., [:number]) from an s-var that `schema` must satisfy."
   [schema typeclass-keywords]
   (if (or (empty? typeclass-keywords) (nil? typeclass-keywords))

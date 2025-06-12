@@ -1,6 +1,6 @@
 (ns erp12.schema-inference.impl.util-test
   (:require [clojure.string :as str]
-            [clojure.test :refer :all]
+            [clojure.test :refer [deftest is testing]]
             [erp12.schema-inference.impl.util :as u]))
 
 (deftest ground?-test
@@ -182,15 +182,15 @@
     (let [env {'a {:type 'int?}} ; 'y and 'z are free in schema, not in env
           schema-to-generalize {:type     :tuple
                                 :children [{:type :s-var :sym 'y :typeclasses [:number]}
-                                           {:type :s-var :sym 'z :typeclasses [:comparable]}]}]
-      (let [generalized (u/generalize env schema-to-generalize)
-            s-vars-map (into {} (map (juxt :sym identity) (:s-vars generalized)))]
-        (is (= (:type generalized) :scheme))
-        (is (= (count (:s-vars generalized)) 2))
-        (is (= (get-in s-vars-map ['y :typeclasses]) [:number]))
-        (is (= (get-in s-vars-map ['z :typeclasses]) [:comparable]))
-        ;; generalize sorts s-vars by sym, so we sort original schema's s-vars for comparison if needed
-        (is (= (:body generalized) schema-to-generalize)))))
+                                           {:type :s-var :sym 'z :typeclasses [:comparable]}]}
+          generalized (u/generalize env schema-to-generalize)
+          s-vars-map (into {} (map (juxt :sym identity) (:s-vars generalized)))]
+      (is (= (:type generalized) :scheme))
+      (is (= (count (:s-vars generalized)) 2))
+      (is (= (get-in s-vars-map ['y :typeclasses]) [:number]))
+      (is (= (get-in s-vars-map ['z :typeclasses]) [:comparable]))
+      ;; generalize sorts s-vars by sym, so we sort original schema's s-vars for comparison if needed
+      (is (= (:body generalized) schema-to-generalize))))
   (testing "generalize schema where some s-vars with typeclasses are also in env"
     (let [env {'y {:type :s-var :sym 'y :typeclasses [:number]}} ; 'y is in env
           schema-to-generalize {:type     :tuple
@@ -390,7 +390,7 @@
            (u/get-free-s-vars-defs {:type :s-var :sym 'a :typeclasses [:number]}))))
   (testing "nested schema with s-vars with typeclasses"
     (is (= #{{:sym 'a :typeclasses [:number]} {:sym 'b :typeclasses [:countable]}}
-           (u/get-free-s-vars-defs {:type :vector :child {:type :tuple :children [{:type :s-var :sym 'a :typeclasses [:number]} {:type :s-var :sym 'b :typeclasses [:countable]}] }}))))
+           (u/get-free-s-vars-defs {:type :vector :child {:type :tuple :children [{:type :s-var :sym 'a :typeclasses [:number]} {:type :s-var :sym 'b :typeclasses [:countable]}]}}))))
   (testing "function schema with s-vars with typeclasses in input and output"
     (is (= #{{:sym 'in :typeclasses [:map]} {:sym 'out :typeclasses [:vector]}}
            (u/get-free-s-vars-defs {:type   :=>
@@ -417,7 +417,7 @@
                                     :s-vars [{:sym 'x :typeclasses [:number]}]
                                     :body   {:type :s-var :sym 'x :typeclasses [:number]}})))
     (is (= #{}
-           (u/get-free-s-vars-defs {:type 'int?})))))
+           (u/get-free-s-vars-defs {:type 'int?}))))
   (testing "schema with multiple distinct free s-vars with different typeclasses"
     (is (= #{{:sym 'a :typeclasses [:number]} {:sym 'b :typeclasses [:string]} {:sym 'c :typeclasses [:boolean]}}
            (u/get-free-s-vars-defs {:type :tuple
@@ -438,15 +438,19 @@
     (is (u/satisfies-all-typeclasses? {:type 'int?} [:number]))
     (is (u/satisfies-all-typeclasses? {:type 'int?} [:number :comparable]))
     (is (not (u/satisfies-all-typeclasses? {:type 'int?} [:countable])))
+    (is (not (u/satisfies-all-typeclasses? {:type 'int?} [:callable])))
+
     (is (not (u/satisfies-all-typeclasses? {:type 'string?} [:number])))
-    (is (u/satisfies-all-typeclasses? {:type 'string?} [:string :comparable]))
+    (is (not (u/satisfies-all-typeclasses? {:type 'string?} [:callable])))
+    (is (u/satisfies-all-typeclasses? {:type 'string?} [:countable :comparable :indexable]))
+
     (is (not (u/satisfies-all-typeclasses? {:type 'int?} [:number :countable])))
     (is (u/satisfies-all-typeclasses? {:type 'int?} []))
     (is (u/satisfies-all-typeclasses? {:type 'int?} nil)))
   (testing "structured type schema"
     (is (u/satisfies-all-typeclasses? {:type :vector :child {:type 'int?}} [:countable]))
     (is (u/satisfies-all-typeclasses? {:type :set :child {:type 'string?}} [:countable]))
-    (is (u/satisfies-all-typeclasses? {:type :map-of :key {:type 'keyword?} :value {:type 'any?}} [:countable]))
+    (is (u/satisfies-all-typeclasses? {:type :map-of :key {:type 'keyword?} :value {:type 'int?}} [:countable]))
     ;; A vector of numbers is not itself a number.
     (is (not (u/satisfies-all-typeclasses? {:type :vector :child {:type 'int?}} [:number]))))
   (testing "unknown typeclass keyword"
