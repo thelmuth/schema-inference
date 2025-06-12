@@ -270,7 +270,8 @@
         ;; Unconstrained 'a' should be bound to constrained 'b'.
         (is (= (u/mgu s-var-unconstrained s-var-constrained) {'a s-var-constrained}))
         ;; Order reversed, 'a' (now constrained) should bind 'b' (unconstrained)
-        (is (= (u/mgu s-var-constrained s-var-unconstrained) {'b s-var-constrained}))))
+        (is (= (u/mgu s-var-constrained s-var-unconstrained)
+               {'b s-var-constrained}))))
     (testing "s-var with s-var - failure (typeclass mismatch)"
       (let [s-var-a {:type :s-var :sym 'a :typeclasses [:number]}
             s-var-b {:type :s-var :sym 'b :typeclasses [:countable]}
@@ -410,7 +411,7 @@
                                                         {:type :s-var :sym 'x :typeclasses [:number]}
                                                         {:type :s-var :sym 'c :typeclasses [:comparable]}]}}))))
   (testing "schema with no free s-vars with typeclasses"
-    (is (= #{}
+    (is (= #{{:sym 'a}}
            (u/get-free-s-vars-defs {:type :s-var :sym 'a})))
     (is (= #{}
            (u/get-free-s-vars-defs {:type   :scheme

@@ -119,7 +119,7 @@
 (defmethod get-free-s-vars-defs :=> [{:keys [input output]}]
   (set/union (get-free-s-vars-defs input) (get-free-s-vars-defs output)))
 
-(defmethod get-free-s-vars-defs :s-var [s-var-def] #{s-var-def})
+(defmethod get-free-s-vars-defs :s-var [s-var-def] #{(dissoc s-var-def :type)})
 
 (defmethod get-free-s-vars-defs :scheme [{:keys [s-vars body]}]
   (set/difference (get-free-s-vars-defs body)
@@ -273,7 +273,7 @@
     (if (empty? sorted-s-var-defs)
       schema-instance
       {:type   :scheme
-       :s-vars (map #(dissoc % :type) sorted-s-var-defs)
+       :s-vars sorted-s-var-defs
        :body   schema-instance})))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
