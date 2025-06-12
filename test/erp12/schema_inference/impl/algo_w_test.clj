@@ -317,12 +317,12 @@
           (is (= result2 {'d s-var-num})))))
 
     (testing "Unifying s-var with typeclass against a concrete type not in typeclass"
-      (let [s-var-counted {:type :s-var :sym 'a :typeclasses [:counted]}
-            int-schema {:type 'int?}] ; int? is not in :counted
-        (let [result (u/mgu s-var-counted int-schema)]
+      (let [s-var-countable {:type :s-var :sym 'a :typeclasses [:countable]}
+            int-schema {:type 'int?}] ; int? is not in :countable
+        (let [result (u/mgu s-var-countable int-schema)]
           (is (u/mgu-failure? result))
           (is (= :typeclass-mismatch (:mgu-failure result)))
-          (is (= [:counted] (:missing-typeclasses result))))))
+          (is (= [:countable] (:missing-typeclasses result))))))
 
     (testing "Unifying s-var with multiple typeclasses against a concrete type satisfying only one"
       (let [s-var-num-comparable {:type :s-var :sym 'a :typeclasses [:number :comparable]}
