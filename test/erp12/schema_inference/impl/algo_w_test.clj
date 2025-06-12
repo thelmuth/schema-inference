@@ -77,7 +77,7 @@
                                :input  {:type     :cat
                                         :children [{:type :s-var :sym 'a}
                                                    {:type :s-var :sym 'a}]}
-                               :output {:type :s-var :sym 'a}}})]
+                               :output {:type :s-var :sym 'a}}}))]
     (is (nil? failure))
     (is (= schema {:type   :=>
                    :input  {:type     :cat
@@ -185,15 +185,15 @@
   (let [{::a/keys [subs schema failure] :as r}
         (algo-w (ana/analyze `(foo (->R 1) 2))
                 (assoc test-env
-                  `->R {:type   :=>
-                        :input  {:type     :cat
-                                 :children [{:type 'int?}]}
-                        :output {:type R}}
-                  `foo {:type   :=>
-                        :input  {:type     :cat
-                                 :children [{:type (:on-interface P)}
-                                            {:type 'int?}]}
-                               :output {:type 'int?}}})]
+                       `->R {:type   :=>
+                             :input  {:type     :cat
+                                      :children [{:type 'int?}]}
+                             :output {:type R}}
+                       `foo {:type   :=>
+                             :input  {:type     :cat
+                                      :children [{:type (:on-interface P)}
+                                                 {:type 'int?}]}
+                             :output {:type 'int?}}))]
     (is (nil? failure))
     (is (= schema {:type 'int?}))
     (is (= (count subs) 1))))
