@@ -280,84 +280,36 @@
 
 (defn satisfies-all-typeclasses?
   "Checks if a given schema satisfies a collection of typeclass keywords.
-  - schema: The schema to check.
-  - typeclass-keywords: A collection of keywords (e.g., [:number :comparable]).
-  - defined-typeclasses: The map of typeclass definitions."
+  - schema: The schema to check (e.g., {'type 'int?} or {:type :s-var ...}).
+  - typeclass-keywords: A collection of keywords (e.g., [:number]) from an s-var that `schema` must satisfy.
+  - defined-typeclasses: The global map of typeclass definitions."
   [schema typeclass-keywords defined-typeclasses]
   (if (or (empty? typeclass-keywords) (nil? typeclass-keywords))
-    true ; No constraints to satisfy
+    true ; No constraints to satisfy.
     (let [schema-type (:type schema)]
-      (every?
-       (fn [tc-keyword]
-         (if-let [allowed-types (get defined-typeclasses tc-keyword)]
-           (cond
-             ;; Case 1: Schema is a ground type
-             (ground? schema)
-             (contains? allowed-types schema-type)
+      (cond
+        ;; Case 1: The schema being checked is another schematic variable.
+        (= schema-type :s-var)
+        (let [svar-to-check-typeclasses (set (:typeclasses schema))]
+          (if (empty? svar-to-check-typeclasses)
+            true ; The s-var being checked is unconstrained, so it satisfies any requirement.
+            ;; Otherwise, the s-var being checked must have all the required typeclasses.
+            (set/subset? (set typeclass-keywords) svar-to-check-typeclasses)))
 
-             ;; Case 2: Schema is a structured type (e.g., :vector, :map-of)
-             (keyword? schema-type) ; Includes :s-var, :vector, :map-of, :=> etc.
-             (if (= schema-type :s-var)
-               ;; Case 2a: Schema is another schematic variable
-               (let [target-s-var-typeclasses (set (:typeclasses schema))]
-                 (if (empty? target-s-var-typeclasses)
-                   true ; Target s-var is fully polymorphic, satisfies any constraint
-                   ;; The required typeclass tc-keyword must be among the target s-var's typeclasses.
-                   ;; This interpretation means an s-var {:typeclasses [:A :B]} satisfies a check for :A, and also for :B
-                   ;; but a check for [:A :C] would fail if the s-var doesn't have :C.
-                   ;; The problem states: "each typeclass in typeclass-keywords (from the first variable)
-                   ;; must also be present in s-var2's typeclasses". This is slightly different.
-                   ;; Let's re-evaluate the s-var logic based on the prompt.
-                   ;; The prompt is: "each typeclass in `typeclass-keywords` (from the first variable)
-                   ;; must also be present in `s-var2`'s typeclasses."
-                   ;; This implies `s-var2`'s typeclasses must be a superset of the required ones for this specific check.
-                   ;; However, the overall check is `every?` over `typeclass-keywords`.
-                   ;; So for each `tc-keyword` in `typeclass-keywords`, we check `s-var2`.
-                   ;; If `s-var2` has no typeclasses, it's true.
-                   ;; If `s-var2` has typeclasses, then `tc-keyword` must be in `s-var2`'s typeclasses.
-
-                   ;; Let's refine s-var logic:
-                   (let [svar-constraints (set (:typeclasses schema))]
-                     (if (empty? svar-constraints)
-                       true ; s-var under check is unconstrained, so it satisfies this specific tc-keyword
-                       (contains? svar-constraints tc-keyword)))
-                   ;; This interpretation seems more aligned with checking one tc-keyword at a time.
-                   ;; The overall `every?` will ensure all are satisfied.
-                   ;; The prompt: "If s-var2 has typeclasses, then each typeclass in typeclass-keywords (from the first variable) must also be present in s-var2's typeclasses."
-                   ;; This condition should be applied if schema is an s-var.
-                   ;; The `every?` iterates `tc-keyword` from `typeclass-keywords`.
-                   ;; So, if schema is s-var, its typeclasses must contain the current `tc-keyword`.
-
-                   ;; Let's re-think s-var logic for clarity according to prompt:
-                   ;; "If schema is another schematic variable s-var2 ({:type :s-var :sym 'b :typeclasses [...]})":
-                   ;;   "If s-var2 has no typeclasses, it satisfies the constraint (it's fully polymorphic)."
-                   ;;   "If s-var2 *has* typeclasses, then each typeclass in typeclass-keywords (from the first variable)
-                   ;;    must also be present in s-var2's typeclasses."
-                   ;; This means `(:typeclasses s-var2)` must be a superset of `typeclass-keywords`.
-                   ;; This check should happen *once* for an s-var, not for each tc-keyword.
-                   ;; So, the structure needs adjustment for s-vars.
-
-                   ;; Corrected structure for s-var check:
-                   ;; This entire `satisfies-all-typeclasses?` is called when s-var1 has constraints.
-                   ;; `typeclass-keywords` are the constraints from s-var1.
-                   ;; `schema` is s-var2.
-                   (if (= schema-type :s-var)
-                     (let [svar2-typeclasses (set (:typeclasses schema))]
-                       (if (empty? svar2-typeclasses)
-                         true ; s-var2 is unconstrained
-                         (set/subset? (set typeclass-keywords) svar2-typeclasses)))
-                     ;; else, it's a concrete type or structured type, check current tc-keyword
-                     (contains? allowed-types schema-type)))
-
-
-             ;; Case 3: Schema is a class type
-             (class? schema-type)
-             (contains? allowed-types schema-type)
-
-
-             :else false)) ; Schema type not recognized
-           false)) ; Typeclass keyword not found in definitions
-       typeclass-keywords))))
+        ;; Case 2: The schema being checked is a concrete type or a structured type.
+        ;; It must satisfy every typeclass keyword listed in `typeclass-keywords`.
+        :else
+        (every?
+         (fn [tc-keyword]
+           (if-let [allowed-types (get defined-typeclasses tc-keyword)]
+             (cond
+               (ground? schema) (contains? allowed-types schema-type)
+               ;; For other keywords like :vector, :map-of, :=> etc. (but not :s-var, handled above)
+               (keyword? schema-type) (contains? allowed-types schema-type)
+               (class? schema-type) (contains? allowed-types schema-type) ; Assumes direct match or appropriate setup in typeclasses map
+               :else false) ; Schema type not applicable for this typeclass check.
+             false)) ; tc-keyword not found in defined-typeclasses.
+         typeclass-keywords)))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Most General Unifier
@@ -393,11 +345,11 @@
 
 ;; Helper to simplify passing defined-typeclasses to recursive mgu calls
 (defn- with-mgu
-  [schema1 schema2 defined-typeclasses മതresult-fn]
+  [schema1 schema2 defined-typeclasses result-fn]
   (let [result (mgu schema1 schema2 defined-typeclasses)]
     (if (mgu-failure? result)
       result
-      (mതresult-fn result))))
+      (result-fn result))))
 
 (defn- bind-var
   "Attempts to bind schematic variable s-var to schema.
