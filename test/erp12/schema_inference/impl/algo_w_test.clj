@@ -12,8 +12,6 @@
 
 ;; @todo Test type checker failures
 
-(def defined-typeclasses tc/typeclasses) ; Make it easily accessible
-
 (def test-env
   {'clojure.lang.Numbers/inc
    {:type   :=>
@@ -52,18 +50,18 @@
                       :child {:type :s-var :sym 'b}}}}})
 
 (deftest algo-w-const-test
-  (is (= (algo-w (ana/analyze :a) test-env defined-typeclasses)
+  (is (= (algo-w (ana/analyze :a) test-env)
          {::a/subs   {}
           ::a/schema {:type 'keyword?}})))
 
 (deftest algo-w-do-test
-  (is (= (algo-w (ana/analyze '(do (println "!") 1)) test-env defined-typeclasses)
+  (is (= (algo-w (ana/analyze '(do (println "!") 1)) test-env)
          {::a/subs   {}
           ::a/schema {:type 'int?}})))
 
 (deftest algo-w-fn-test
   (let [{::a/keys [subs schema failure]}
-        (algo-w (ana/analyze '(fn [x] (inc x))) test-env defined-typeclasses)]
+        (algo-w (ana/analyze '(fn [x] (inc x))) test-env)]
     (is (nil? failure))
     (is (= schema {:type   :=>
                    :input  {:type     :cat
@@ -79,8 +77,7 @@
                                :input  {:type     :cat
                                         :children [{:type :s-var :sym 'a}
                                                    {:type :s-var :sym 'a}]}
-                               :output {:type :s-var :sym 'a}}})
-                defined-typeclasses)]
+                               :output {:type :s-var :sym 'a}}})]
     (is (nil? failure))
     (is (= schema {:type   :=>
                    :input  {:type     :cat
@@ -89,7 +86,7 @@
     (is (= (count subs) 4)))
   (testing "nullary"
     (let [{::a/keys [subs schema failure]}
-          (algo-w (ana/analyze `((fn [] 1))) {} defined-typeclasses)]
+          (algo-w (ana/analyze `((fn [] 1))) {})]
       (is (nil? failure))
       (is (= schema {:type 'int?}))
       (is (= (count subs) 1))))
@@ -103,8 +100,7 @@
                                  :input  {:type     :cat
                                           :children [{:type :s-var :sym 'a}
                                                      {:type :s-var :sym 'b}]}
-                                 :output {:type :s-var :sym 'b}}})
-                  defined-typeclasses)
+                                 :output {:type :s-var :sym 'b}}}))
           inputs (set (get-in schema [:input :children]))
           output (:output schema)]
       (is (nil? failure))
@@ -117,13 +113,13 @@
 
 (deftest algo-w-if-test
   (let [{::a/keys [subs schema failure]}
-        (algo-w (ana/analyze `(if true 1 2)) test-env defined-typeclasses)]
+        (algo-w (ana/analyze `(if true 1 2)) test-env)]
     (is (nil? failure))
     (is (= schema {:type 'int?}))
     (is (= (count subs) 2)))
   (testing "failure"
     (let [{::a/keys [subs schema failure]}
-          (algo-w (ana/analyze `(if true 1 "2")) test-env defined-typeclasses)]
+          (algo-w (ana/analyze `(if true 1 "2")) test-env)]
       (is (= failure
              {:unification-failure {:mgu-failure :non-equal
                                     :schema-1    {:type 'int?}
@@ -132,16 +128,16 @@
       (is (nil? subs)))))
 
 (deftest algo-w-import-test
-  (is (= (algo-w (ana/analyze `(import 'clojure.lang.Keyword)) test-env defined-typeclasses)
+  (is (= (algo-w (ana/analyze `(import 'clojure.lang.Keyword)) test-env)
          {::a/subs {} ::a/schema nil?})))
 
 (deftest algo-w-instance?-test
-  (is (= (algo-w (ana/analyze `(instance? String "")) test-env defined-typeclasses)
+  (is (= (algo-w (ana/analyze `(instance? String "")) test-env)
          {::a/subs {} ::a/schema 'boolean?})))
 
 (deftest algo-w-invoke-test
   (let [{::a/keys [subs schema failure]}
-        (algo-w (ana/analyze `(map inc [0])) test-env defined-typeclasses)]
+        (algo-w (ana/analyze `(map inc [0])) test-env)]
     (is (nil? failure))
     (is (= schema {:type :vector :child {:type 'int?}}))
     (is (= (count subs) 3))))
@@ -151,8 +147,7 @@
         (algo-w (ana/analyze `(let [f# inc
                                     a# 1]
                                 (f# a#)))
-                test-env
-                defined-typeclasses)]
+                test-env)]
     (is (nil? failure))
     (is (= schema {:type 'int?}))
     (is (= (count subs) 1))))
@@ -162,8 +157,7 @@
         (algo-w (ana/analyze `(letfn [(f# [x#] (inc x#))
                                       (g# [y#] (f# (f# y#)))]
                                 (g# 0)))
-                test-env
-                defined-typeclasses)]
+                test-env)]
     (is (nil? failure))
     (is (= schema {:type 'int?}))
     (is (= (count subs) 6)))
@@ -175,7 +169,7 @@
 
 (deftest algo-w-prim-invoke-test
   (let [{::a/keys [subs schema failure]}
-        (algo-w (ana/analyze '((fn [^long x] x) 1)) test-env defined-typeclasses)]
+        (algo-w (ana/analyze '((fn [^long x] x) 1)) test-env)]
     (is (nil? failure))
     (is (= schema {:type 'int?}))
     (is (= (count subs) 2))))
@@ -199,14 +193,13 @@
                         :input  {:type     :cat
                                  :children [{:type (:on-interface P)}
                                             {:type 'int?}]}
-                        :output {:type 'int?}})
-                defined-typeclasses)]
+                               :output {:type 'int?}}})]
     (is (nil? failure))
     (is (= schema {:type 'int?}))
     (is (= (count subs) 1))))
 
 (deftest algo-w-quote-test
-  (is (= (algo-w (ana/analyze `(quote (+ 1 2))) test-env defined-typeclasses)
+  (is (= (algo-w (ana/analyze `(quote (+ 1 2))) test-env)
          {::a/subs   {}
           ::a/schema {:type  :sequential
                       :child {:type 'some?}}})))
@@ -214,19 +207,19 @@
 ;(deftest algo-w-set!-test)
 
 (deftest algo-w-static-call-test
-  (let [{::a/keys [subs schema failure]} (algo-w (ana/analyze '(inc 1)) test-env defined-typeclasses)]
+  (let [{::a/keys [subs schema failure]} (algo-w (ana/analyze '(inc 1)) test-env)]
     (is (nil? failure))
     (is (= schema {:type 'int?}))
     (is (= (count subs) 1))))
 
 (deftest algo-w-static-field-test
-  (let [{::a/keys [subs schema failure]} (algo-w (ana/analyze `System/out) test-env defined-typeclasses)]
+  (let [{::a/keys [subs schema failure]} (algo-w (ana/analyze `System/out) test-env)]
     (is (nil? failure))
     (is (= schema {:type PrintStream}))
     (is (= (count subs) 0))))
 
 (deftest algo-w-the-var-test
-  (let [{::a/keys [subs schema failure]} (algo-w (ana/analyze `(var +)) test-env defined-typeclasses)]
+  (let [{::a/keys [subs schema failure]} (algo-w (ana/analyze `(var +)) test-env)]
     (is (nil? failure))
     (is (= schema {:type 'var?}))
     (is (= (count subs) 0))))
@@ -235,7 +228,7 @@
 ;(deftest algo-w-try-test)
 
 (deftest algo-w-var-test
-  (let [{::a/keys [subs schema failure]} (algo-w (ana/analyze `clojure.core/inc) test-env defined-typeclasses)]
+  (let [{::a/keys [subs schema failure]} (algo-w (ana/analyze `clojure.core/inc) test-env)]
     (is (nil? failure))
     (is (= schema {:type   :=>
                    :input  {:type     :cat
@@ -258,11 +251,11 @@
           bool-schema {:type 'boolean?}]
 
       (testing "s-var with :typeclasses [:number] vs 'int?"
-        (is (map? (u/mgu s-var-num int-schema defined-typeclasses)))
-        (is (not (u/mgu-failure? (u/mgu s-var-num int-schema defined-typeclasses)))))
+        (is (map? (u/mgu s-var-num int-schema)))
+        (is (not (u/mgu-failure? (u/mgu s-var-num int-schema)))))
 
       (testing "s-var with :typeclasses [:number] vs 'string?"
-        (let [result (u/mgu s-var-num string-schema defined-typeclasses)]
+        (let [result (u/mgu s-var-num string-schema)]
           (is (u/mgu-failure? result))
           (is (= (:mgu-failure result) :typeclass-mismatch))
           (is (= (:s-var result) s-var-num))
@@ -288,7 +281,7 @@
         ;; Let's assume s-var-num is 'a and s-var-num-comp is 'b
         ;; u/mgu a b -> bind-var a b -> {a b} is possible if b satisfies a's constraints.
         ;; u/mgu b a -> bind-var b a -> {b a} is possible if a satisfies b's constraints.
-        (let [res1 (u/mgu s-var-num s-var-num-comp defined-typeclasses)]
+        (let [res1 (u/mgu s-var-num s-var-num-comp)]
           (is (not (u/mgu-failure? res1)))
           ;; expecting 'a -> s-var-num-comp OR 'b -> s-var-num.
           ;; If 'a -> s-var-num-comp, 'a effectively gets constraints [:number :comparable]
@@ -298,14 +291,14 @@
           (is (= res1 {'a s-var-num-comp}))
           )
 
-        (let [res2 (u/mgu s-var-num-comp s-var-num defined-typeclasses)]
+        (let [res2 (u/mgu s-var-num-comp s-var-num)]
            ;; (bind-var s-var-num-comp s-var-num): s-var-num satisfies [:number :comparable] from s-var-num-comp? No.
           (is (u/mgu-failure? res2))
           (is (= (:mgu-failure res2) :typeclass-mismatch))
           (is (= (:missing-typeclasses res2) [:comparable]))))
 
       (testing "s-var a [:number :comparable] with s-var b [:number]"
-        (let [result (u/mgu s-var-num-comp s-var-num defined-typeclasses)]
+        (let [result (u/mgu s-var-num-comp s-var-num)]
           (is (u/mgu-failure? result))
           (is (= (:mgu-failure result) :typeclass-mismatch))
           (is (= (:s-var result) s-var-num-comp))
@@ -314,19 +307,19 @@
 
       (testing "s-var a [:number] with s-var b [] (no typeclasses)"
         ;; s-var-any satisfies [:number]? Yes, because it's unconstrained.
-        (let [result1 (u/mgu s-var-num s-var-any defined-typeclasses)]
+        (let [result1 (u/mgu s-var-num s-var-any)]
           (is (not (u/mgu-failure? result1)))
           (is (= result1 {'a s-var-any})))
 
         ;; s-var-num satisfies []? Yes.
-        (let [result2 (u/mgu s-var-any s-var-num defined-typeclasses)]
+        (let [result2 (u/mgu s-var-any s-var-num)]
           (is (not (u/mgu-failure? result2)))
           (is (= result2 {'d s-var-num})))))
 
     (testing "Unifying s-var with typeclass against a concrete type not in typeclass"
       (let [s-var-counted {:type :s-var :sym 'a :typeclasses [:counted]}
             int-schema {:type 'int?}] ; int? is not in :counted
-        (let [result (u/mgu s-var-counted int-schema defined-typeclasses)]
+        (let [result (u/mgu s-var-counted int-schema)]
           (is (u/mgu-failure? result))
           (is (= :typeclass-mismatch (:mgu-failure result)))
           (is (= [:counted] (:missing-typeclasses result))))))
@@ -334,14 +327,14 @@
     (testing "Unifying s-var with multiple typeclasses against a concrete type satisfying only one"
       (let [s-var-num-comparable {:type :s-var :sym 'a :typeclasses [:number :comparable]}
             int-schema {:type 'int?}] ; int? is :number and :comparable
-        (is (not (u/mgu-failure? (u/mgu s-var-num-comparable int-schema defined-typeclasses)))))
+        (is (not (u/mgu-failure? (u/mgu s-var-num-comparable int-schema)))))
 
       ;; This test is tricky due to how satisfies-all-typeclasses? works for concrete types.
       ;; It checks if the concrete type (string?) satisfies *each* tc in s-var's list.
       ;; string? is :comparable, but not :number. So it fails for :number.
       (let [s-var-num-comparable {:type :s-var :sym 'a :typeclasses [:number :comparable]}
             string-schema {:type 'string?}] ; string? is :comparable but not :number
-        (let [result (u/mgu s-var-num-comparable string-schema defined-typeclasses)]
+        (let [result (u/mgu s-var-num-comparable string-schema)]
           (is (u/mgu-failure? result))
           (is (= :typeclass-mismatch (:mgu-failure result)))
           (is (= [:number] (:missing-typeclasses result))))))
@@ -352,14 +345,14 @@
       ;; (mgu 'a 'b) -> bind 'a to 'b is okay because 'b satisfies [:number]
       (let [sva {:type :s-var :sym 'a :typeclasses [:number]}
             svb {:type :s-var :sym 'b :typeclasses [:number :comparable]}]
-        (is (= (u/mgu sva svb defined-typeclasses) {'a svb})))
+        (is (= (u/mgu sva svb) {'a svb})))
 
       ;; s-var 'a' requires [:number :comparable]
       ;; s-var 'b' has constraints [:number] (less specific)
       ;; (mgu 'a 'b) -> bind 'a to 'b: does 'b satisfy [:number :comparable]? No. Fails.
       (let [sva {:type :s-var :sym 'a :typeclasses [:number :comparable]}
             svb {:type :s-var :sym 'b :typeclasses [:number]}]
-        (let [result (u/mgu sva svb defined-typeclasses)]
+        (let [result (u/mgu sva svb)]
           (is (u/mgu-failure? result))
           (is (= :typeclass-mismatch (:mgu-failure result)))
           (is (= (:missing-typeclasses result) [:comparable])))))

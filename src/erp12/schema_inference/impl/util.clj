@@ -281,9 +281,8 @@
 (defn satisfies-all-typeclasses?
   "Checks if a given schema satisfies a collection of typeclass keywords.
   - schema: The schema to check (e.g., {'type 'int?} or {:type :s-var ...}).
-  - typeclass-keywords: A collection of keywords (e.g., [:number]) from an s-var that `schema` must satisfy.
-  - defined-typeclasses: The global map of typeclass definitions."
-  [schema typeclass-keywords defined-typeclasses]
+  - typeclass-keywords: A collection of keywords (e.g., [:number]) from an s-var that `schema` must satisfy."
+  [schema typeclass-keywords]
   (if (or (empty? typeclass-keywords) (nil? typeclass-keywords))
     true ; No constraints to satisfy.
     (let [schema-type (:type schema)]
@@ -301,23 +300,22 @@
         :else
         (every?
          (fn [tc-keyword]
-           (if-let [allowed-types (get defined-typeclasses tc-keyword)]
+           (if-let [allowed-types (get tc/typeclasses tc-keyword)] ; Use tc/typeclasses
              (cond
                (ground? schema) (contains? allowed-types schema-type)
                ;; For other keywords like :vector, :map-of, :=> etc. (but not :s-var, handled above)
                (keyword? schema-type) (contains? allowed-types schema-type)
                (class? schema-type) (contains? allowed-types schema-type) ; Assumes direct match or appropriate setup in typeclasses map
                :else false) ; Schema type not applicable for this typeclass check.
-             false)) ; tc-keyword not found in defined-typeclasses.
+             false)) ; tc-keyword not found in tc/typeclasses.
          typeclass-keywords)))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Most General Unifier
 
 (defn- mgu-dispatch
-  "Dispatch function for mgu. Now takes an additional `defined-typeclasses` arg,
-  but dispatch is only on the first two schemas a and b."
-  [a b _defined-typeclasses]
+  "Dispatch function for mgu. Dispatch is only on the types of the first two schemas a and b."
+  [a b]
   (cond
     (and (= (:type a) :maybe)
          (= (:type b) :maybe))
@@ -335,7 +333,7 @@
 
 (defmulti mgu
   "Computes the Most General Unifier (MGU) for two schemas, `a` and `b`,
-  considering typeclass constraints.
+  considering typeclass constraints (using global tc/typeclasses).
   The MGU is a substitution map that, when applied to both `a` and `b`,
   makes them identical. If no such substitution exists, it returns a map
   indicating an MGU failure (see `mgu-failure?`).
@@ -343,18 +341,18 @@
   handling schema variables (:s-var) specially."
   mgu-dispatch)
 
-;; Helper to simplify passing defined-typeclasses to recursive mgu calls
+;; Helper to call mgu and then a function on its non-failure result.
 (defn- with-mgu
-  [schema1 schema2 defined-typeclasses result-fn]
-  (let [result (mgu schema1 schema2 defined-typeclasses)]
+  [schema1 schema2 result-fn]
+  (let [result (mgu schema1 schema2)]
     (if (mgu-failure? result)
       result
       (result-fn result))))
 
 (defn- bind-var
   "Attempts to bind schematic variable s-var to schema.
-  Performs occurs check and typeclass compatibility check."
-  [{:keys [sym typeclasses] :as s-var} schema defined-typeclasses]
+  Performs occurs check and typeclass compatibility check (using global tc/typeclasses)."
+  [{:keys [sym typeclasses] :as s-var} schema]
   (cond
     (= s-var schema) {}
 
@@ -365,8 +363,8 @@
 
     ;; Typeclass check
     (and (not-empty typeclasses)
-         (not (satisfies-all-typeclasses? schema typeclasses defined-typeclasses)))
-    (let [violated-typeclasses (filterv #(not (satisfies-all-typeclasses? schema [%] defined-typeclasses)) typeclasses)]
+         (not (satisfies-all-typeclasses? schema typeclasses)))
+    (let [violated-typeclasses (filterv #(not (satisfies-all-typeclasses? schema [%])) typeclasses)]
       {:mgu-failure       :typeclass-mismatch
        :s-var             s-var
        :schema            schema
@@ -376,36 +374,35 @@
 
 (defmethod mgu [:s-var :_]
   ;; "Unifies a schema variable `a` with schema `b`."
-  [a b defined-typeclasses] (bind-var a b defined-typeclasses))
+  [a b] (bind-var a b))
 
 (defmethod mgu [:_ :s-var]
   ;; "Unifies schema `a` with a schema variable `b`."
-  [a b defined-typeclasses] (bind-var b a defined-typeclasses))
+  [a b] (bind-var b a))
 
 (defn- mgu-schema-ctor1
-  [{a-type :type a-child :child :as a} {b-type :type b-child :child :as b} defined-typeclasses]
+  [{a-type :type a-child :child :as a} {b-type :type b-child :child :as b}]
   (if (not= a-type b-type)
     {:mgu-failure :mismatched-schema-ctor
      :schema-1    a
      :schema-2    b}
-    (mgu a-child b-child defined-typeclasses)))
+    (mgu a-child b-child)))
 
 (defmethod mgu [:vector :vector]
-  [a b defined-typeclasses] (mgu-schema-ctor1 a b defined-typeclasses))
+  [a b] (mgu-schema-ctor1 a b))
 
 (defmethod mgu [:set :set]
-  [a b defined-typeclasses] (mgu-schema-ctor1 a b defined-typeclasses))
+  [a b] (mgu-schema-ctor1 a b))
 
 (defmethod mgu [:sequential :sequential]
-  [a b defined-typeclasses] (mgu-schema-ctor1 a b defined-typeclasses))
+  [a b] (mgu-schema-ctor1 a b))
 
 (defmethod mgu [:maybe :maybe]
-  [a b defined-typeclasses] (mgu-schema-ctor1 a b defined-typeclasses))
+  [a b] (mgu-schema-ctor1 a b))
 
 (defn- mgu-schema-ctorN
   [{a-type :type a-children :children :as a}
-   {b-type :type b-children :children :as b}
-   defined-typeclasses]
+   {b-type :type b-children :children :as b}]
   (cond
     (not= a-type b-type)
     {:mgu-failure :mismatched-schema-ctor
@@ -424,44 +421,41 @@
                      subs
                      (with-mgu (substitute subs a-child)
                                (substitute subs b-child)
-                               defined-typeclasses
                                #(compose-substitutions % subs))))
                  {}))))
 
 (defmethod mgu [:tuple :tuple]
-  [a b defined-typeclasses] (mgu-schema-ctorN a b defined-typeclasses))
+  [a b] (mgu-schema-ctorN a b))
 
 (defmethod mgu [:cat :cat]
-  [a b defined-typeclasses] (mgu-schema-ctorN a b defined-typeclasses))
+  [a b] (mgu-schema-ctorN a b))
 
 (defmethod mgu [:map-of :map-of]
-  [{a-key :key a-value :value} {b-key :key b-value :value} defined-typeclasses]
-  (with-mgu a-key b-key defined-typeclasses
+  [{a-key :key a-value :value} {b-key :key b-value :value}]
+  (with-mgu a-key b-key
             (fn [key-subs]
               (with-mgu (substitute key-subs a-value)
                         (substitute key-subs b-value)
-                        defined-typeclasses
                         (fn [value-subs]
                           (compose-substitutions value-subs key-subs))))))
 
 (defmethod mgu [:=> :=>]
-  [{a-input :input a-output :output :as a} {b-input :input b-output :output :as b} defined-typeclasses]
+  [{a-input :input a-output :output :as a} {b-input :input b-output :output :as b}]
   ;; @todo Support other function args (named, variatic) aside from :cat
   (if (or (not= (:type a-input) :cat)
           (not= (:type b-input) :cat))
     {:mgu-failure :non-positional-args
      :schema-1    a
      :schema-2    b}
-    (with-mgu a-input b-input defined-typeclasses
+    (with-mgu a-input b-input
               (fn [subs]
                 (with-mgu (substitute subs a-output)
                           (substitute subs b-output)
-                          defined-typeclasses
                           #(compose-substitutions % subs))))))
 
 (defmethod mgu :default
   ;; "Default unification rule: two schemas can unify if and only if they are identical."
-  [a b _defined-typeclasses]
+  [a b]
   (if (= a b)
     {}
     {:schema-1    a

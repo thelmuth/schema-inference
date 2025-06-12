@@ -1,15 +1,14 @@
 (ns erp12.schema-inference.impl.algo_w
   (:require [clojure.datafy :refer [datafy]]
             [erp12.schema-inference.impl.util :as u]
-            [erp12.schema-inference.impl.typeclasses :as tc] ; Added require
+            ;; [erp12.schema-inference.impl.typeclasses :as tc] ; No longer directly needed by algo-w
             [malli.core :as m]
             [malli.provider :as mp]))
 
 (defmulti algo-w
   "Core of the schema inference algorithm (Algorithm W).
-  Dispatches on the :op of the AST node.
-  Now takes defined-typeclasses as an additional argument."
-  (fn [{:keys [op]} _env _defined-typeclasses] op)) ; Dispatch only on op
+  Dispatches on the :op of the AST node."
+  (fn [{:keys [op]} _env] op)) ; Dispatch only on op and env
 
 (defn- algo-w-failure?
   [x]
@@ -21,8 +20,7 @@
   Takes an AST node and an environment map as input.
   Returns the inferred schema for the AST node."
   [ast env]
-  ;; tc/typeclasses is the global map of defined typeclasses
-  (let [{::keys [schema] :as result} (algo-w ast env tc/typeclasses)]
+  (let [{::keys [schema] :as result} (algo-w ast env)]
     (if (algo-w-failure? result)
       (throw (ex-info "Schema inference failure." result))
       schema)))
@@ -35,14 +33,14 @@
 
 (defmethod algo-w :LIT
   ;; "Handles literal values, converting them to their schema representation."
-  [{:keys [type val]} _env _defined-typeclasses]
+  [{:keys [type val]} _env]
   {::subs   {}
    ::schema (case type
               :class {:type Class}
               (m/ast (mp/provide [val])))})
 
 (defmethod algo-w :VAR
-  [{:keys [sym]} env _defined-typeclasses]
+  [{:keys [sym]} env]
   (let [sym (symbol sym)]
     (if (contains? env sym)
       {::subs   {}
@@ -53,9 +51,9 @@
   ;; "Handles function applications (invocations).
   ;; Infers schema of the function and arguments, then unifies the function's
   ;; input schema with the argument schemas to determine the output schema."
-  [{:keys [fn args]} env defined-typeclasses]
+  [{:keys [fn args]} env]
   (let [s-var {:type :s-var :sym (gensym "s-")}
-        {f-subs ::subs f-schema ::schema :as fn-result} (algo-w fn env defined-typeclasses)]
+        {f-subs ::subs f-schema ::schema :as fn-result} (algo-w fn env)]
     (if (algo-w-failure? fn-result)
       fn-result
       (let [args-ti (loop [remaining-args args
@@ -64,7 +62,7 @@
                       (if (empty? remaining-args)
                         args-ti
                         (let [arg (first remaining-args)
-                              {a-subs ::subs :as arg-ti} (algo-w arg env' defined-typeclasses)]
+                              {a-subs ::subs :as arg-ti} (algo-w arg env')]
                           (if (algo-w-failure? arg-ti)
                             arg-ti
                             (recur (rest remaining-args)
@@ -80,8 +78,7 @@
                              {:type   :=>
                               :input  {:type     :cat
                                        :children (mapv ::schema args-ti)}
-                              :output s-var}
-                             defined-typeclasses)] ; Pass defined-typeclasses to mgu
+                              :output s-var})] ; Removed defined-typeclasses from mgu call
             (if (u/mgu-failure? subs')
               {::failure {:unification-failure subs'}}
               {::subs   (u/compose-substitutions subs' subs)
@@ -92,14 +89,14 @@
   ;; Infers the schema of the function body within an environment
   ;; extended with type variables for the function parameters.
   ;; Returns a function schema (=>)."
-  [{:keys [params body] :as ast} env defined-typeclasses]
+  [{:keys [params body] :as ast} env]
   ;; @todo Support variadic functions.
   (when (some :variadic? params)
     (throw (ex-info "Variadic functions not supported." {:ast ast})))
   (let [param-names (map :name params)
         s-vars (vec (repeatedly (count params) #(hash-map :type :s-var :sym (gensym "s-"))))
         env' (into env (map vector param-names s-vars))
-        {::keys [subs schema] :as result} (algo-w body env' defined-typeclasses)]
+        {::keys [subs schema] :as result} (algo-w body env')]
     (if (algo-w-failure? result)
       result
       {::subs   subs
@@ -112,18 +109,18 @@
   ;; "Handles let bindings (e.g., `let` forms).
   ;; Infers schemas for bindings sequentially, extending the environment for each.
   ;; Then infers the schema of the body using the fully extended environment."
-  [{:keys [bindings body]} env defined-typeclasses]
+  [{:keys [bindings body]} env]
   (loop [remaining bindings
          env' env
          subs {}]
     (if (empty? remaining)
-      (let [{body-subs ::subs body-schema ::schema :as result} (algo-w body (u/substitute-env subs env') defined-typeclasses)]
+      (let [{body-subs ::subs body-schema ::schema :as result} (algo-w body (u/substitute-env subs env'))]
         (if (algo-w-failure? result)
           result
           {::subs   (u/compose-substitutions body-subs subs)
            ::schema body-schema}))
       (let [{:keys [name init]} (first remaining)
-            {local-subs ::subs local-schema ::schema :as result} (algo-w init env' defined-typeclasses)]
+            {local-subs ::subs local-schema ::schema :as result} (algo-w init env')]
         (if (algo-w-failure? result)
           result
           (let [env' (dissoc env' name) ; env' for next binding, not for generalize
@@ -139,7 +136,7 @@
 (defmethod algo-w :binding
   ;; "Handles :binding AST nodes. This method should be unreachable
   ;; as :binding nodes are expected to be processed by their parent nodes (e.g., :LET)."
-  [_ _env _defined-typeclasses] (assert false "Should be unreachable."))
+  [_env _op] (assert false "Should be unreachable."))
 
 ;(defmethod algo-w :case [ast env])
 ;(defmethod algo-w :case-test [ast env])
@@ -149,23 +146,22 @@
   ;; "Handles :catch clauses within a :try expression.
   ;; Infers the schema of the catch clause's body.
   ;; Note: Exception type checking is a TODO."
-  [{:keys [body]} env defined-typeclasses]
-  (algo-w body env defined-typeclasses))
+  [{:keys [body]} env]
+  (algo-w body env))
 
 (defmethod algo-w :const
   ;; "Handles :const AST nodes, typically representing literal constants.
   ;; Delegates to the :LIT method by changing the :op of the AST node."
-  [ast env defined-typeclasses]
-  (algo-w (assoc ast :op :LIT) env defined-typeclasses))
+  [ast env]
+  (algo-w (assoc ast :op :LIT) env))
 
 (defmethod algo-w :def
   ;; "Handles :def expressions (defining vars).
   ;; Infers the schema of the init expression, if present.
   ;; The schema of a :def expression itself is always `var?`."
-  [{:keys [name init]} env defined-typeclasses]
+  [{:keys [name init]} env]
   {::subs   (if (nil? init)
               {}
-              ;; infer-schema will pick up tc/typeclasses from its own scope
               {name (infer-schema init env)})
    ::schema {:type 'var?}})
 
@@ -175,17 +171,17 @@
   ;; "Handles :do expressions.
   ;; Infers the schema of the `ret` (return) expression within the :do block,
   ;; as this determines the overall schema of the :do form."
-  [{:keys [ret]} env defined-typeclasses]
-  (algo-w ret env defined-typeclasses))
+  [{:keys [ret]} env]
+  (algo-w ret env))
 
 (defmethod algo-w :fn
   ;; "Handles :fn expressions (function definitions).
   ;; Currently supports single-arity functions by delegating to the :ABS method.
   ;; Support for multiple arities (overloading) is a TODO."
-  [{:keys [methods] :as ast} env defined-typeclasses]
+  [{:keys [methods] :as ast} env]
   ;; @todo Support multiple methods (aka overloading).
   (if (= (count methods) 1)
-    (algo-w (first methods) env defined-typeclasses)
+    (algo-w (first methods) env)
     (throw (ex-info "Cannot infer schema of functions with multiple methods."
                     {:ast ast}))))
 
@@ -193,8 +189,8 @@
   ;; "Handles individual method definitions within an :fn expression.
   ;; Delegates to the :ABS method for schema inference, treating each
   ;; method as a separate abstraction."
-  [ast env defined-typeclasses]
-  (algo-w (assoc ast :op :ABS) env defined-typeclasses))
+  [ast env]
+  (algo-w (assoc ast :op :ABS) env))
 
 ;; @todo Support classes as ground types!
 ;; @todo Consider reflection instead of the type environment for interop ASTs. (JVM only).
@@ -207,19 +203,18 @@
   ;;  `clojure.core/if` var with the test, then, and else branches as arguments.
   ;;  The schema of `clojure.core/if` is expected to handle the unification
   ;;  of the `then` and `else` branch schemas."
-  [{:keys [test then else]} env defined-typeclasses]
+  [{:keys [test then else]} env]
   (algo-w {:op   :APP
            :fn   {:op  :var
                   :var 'clojure.core/if}
            :args [test then else]}
-          env
-          defined-typeclasses))
+          env))
 
 (defmethod algo-w :import
   ;;  "Handles :import expressions.
   ;;  The schema of an :import expression is `nil?` as it does not produce a value.
   ;;  A TODO notes checking if the AST node is a symbol constant."
-  [_ _env _defined-typeclasses]
+  [_ _env]
   ;; @todo Should this check the AST is a symbol constant?
   {::subs {} ::schema nil?})
 
@@ -231,7 +226,7 @@
   ;;  The schema of an :instance? expression is always `boolean?`.
   ;;  This method assumes the Class argument is a constant in the AST.
   ;;  If it's a non-constant, an :invoke node would be used instead."
-  [_ _env _defined-typeclasses]
+  [_ _env]
   ;; This AST node is used when a Class constant is in the AST, therefore we don't need to type check.
   ;; When a non-const AST is provided for the Class argument to instance?, an :invoke node will be used.
   {::subs {} ::schema 'boolean?})
@@ -239,8 +234,8 @@
 (defmethod algo-w :invoke
   ;;  "Handles :invoke expressions (general function invocations).
   ;;  Delegates to the :APP method by changing the :op of the AST node."
-  [ast env defined-typeclasses]
-  (algo-w (assoc ast :op :APP) env defined-typeclasses))
+  [ast env]
+  (algo-w (assoc ast :op :APP) env))
 
 ;; @todo Implement record-like theory (HMaps, relational algebra, etc.)
 ;(defmethod algo-w :keyword-invoke [ast env])
@@ -248,23 +243,23 @@
 (defmethod algo-w :let
   ;;  "Handles :let expressions (dispatching on the lowercase :let keyword).
   ;;  Delegates to the :LET method (uppercase keyword) for actual schema inference."
-  [ast env defined-typeclasses]
-  (algo-w (assoc ast :op :LET) env defined-typeclasses))
+  [ast env]
+  (algo-w (assoc ast :op :LET) env))
 
 (defmethod algo-w :letfn
   ;;  "Handles :letfn expressions.
   ;;  Delegates to the :LET method for schema inference.
   ;;  A TODO notes that this currently has limitations with allowing
   ;;  ahead-of-definition use of functions defined in the letfn."
-  [ast env defined-typeclasses]
+  [ast env]
   ;; @todo This incorrectly fails to allow ahead-of-definition use of functions.
-  (algo-w (assoc ast :op :LET) env defined-typeclasses))
+  (algo-w (assoc ast :op :LET) env))
 
 (defmethod algo-w :local
   ;;  "Handles :local AST nodes, representing local bindings or variables.
   ;;  Delegates to the :VAR method by creating a :VAR AST node with the local's name."
-  [{:keys [name]} env defined-typeclasses]
-  (algo-w {:op :VAR :sym name} env defined-typeclasses))
+  [{:keys [name]} env]
+  (algo-w {:op :VAR :sym name} env))
 
 ;(defmethod algo-w :loop [ast env])
 ;(defmethod algo-w :map [{:keys [keys vals}} env])
@@ -286,8 +281,8 @@
 (defmethod algo-w :prim-invoke
   ;;  "Handles :prim-invoke expressions, representing invocations of primitive operations.
   ;;  Delegates to the :APP method for schema inference."
-  [ast env defined-typeclasses]
-  (algo-w (assoc ast :op :APP) env defined-typeclasses))
+  [ast env]
+  (algo-w (assoc ast :op :APP) env))
 
 (defmethod algo-w :protocol-invoke
   ;;  "Handles :protocol-invoke expressions.
@@ -296,13 +291,13 @@
   ;;  If it does, it infers the schema for the remaining arguments using a
   ;;  'currying-ish' strategy, effectively applying the protocol method to the target
   ;;  and then to the subsequent arguments."
-  [{:keys [target protocol-fn args]} env defined-typeclasses]
+  [{:keys [target protocol-fn args]} env]
   (let [protocol (-> protocol-fn :meta :protocol deref :on-interface)
-        {fn-schema ::schema fn-subs ::subs :as result} (algo-w protocol-fn env defined-typeclasses)]
+        {fn-schema ::schema fn-subs ::subs :as result} (algo-w protocol-fn env)]
     (if (algo-w-failure? result)
       result
       (let [env' (u/substitute-env fn-subs env)
-            {target-schema ::schema target-subs ::subs :as result} (algo-w target env' defined-typeclasses)]
+            {target-schema ::schema target-subs ::subs :as result} (algo-w target env')]
         (cond
           (algo-w-failure? result)
           result
@@ -315,8 +310,7 @@
                      :fn   {:op :local :name tmp-f}
                      :args args}
                     (assoc env'
-                      tmp-f (u/substitute target-subs (update-in fn-schema [:input :children] rest)))
-                    defined-typeclasses))
+                      tmp-f (u/substitute target-subs (update-in fn-schema [:input :children] rest)))))
 
           :else
           {::failure {:must-extend-protocol (.getName protocol)
@@ -326,8 +320,8 @@
 (defmethod algo-w :quote
   ;;  "Handles :quote expressions.
   ;;  Infers the schema of the quoted expression itself."
-  [{:keys [expr]} env defined-typeclasses]
-  (algo-w expr env defined-typeclasses))
+  [{:keys [expr]} env]
+  (algo-w expr env))
 
 ;(defmethod algo-w :recur [ast env])
 ;(defmethod algo-w :reify [ast env])
@@ -337,27 +331,26 @@
   ;;  "Handles :set! expressions.
   ;;  Infers the schema of the value being set. The schema of the `set!` expression
   ;;  itself is the schema of this value."
-  [{:keys [val]} env defined-typeclasses]
-  (algo-w val env defined-typeclasses))
+  [{:keys [val]} env]
+  (algo-w val env))
 
 (defmethod algo-w :static-call
   ;;  "Handles :static-call expressions (Java static method calls).
   ;;  Transforms the static call into an :APP (application) of a var
   ;;  representing the static method. The var is constructed using the class
   ;;  and method name from the AST."
-  [{:keys [class method] :as ast} env defined-typeclasses]
+  [{:keys [class method] :as ast} env]
   (algo-w (assoc ast
             :op :APP
             :fn {:op  :var
                  :var (symbol (.getName class) (name method))})
-          env
-          defined-typeclasses))
+          env))
 
 (defmethod algo-w :static-field
   ;;  "Handles :static-field AST nodes (Java static field access).
   ;;  The schema is determined by reflecting on the field's type using `datafy`
   ;;  and `Class/forName`."
-  [{:keys [class field]} _env _defined-typeclasses]
+  [{:keys [class field]} _env]
   {::subs   {}
    ::schema {:type (-> (datafy class)
                        :members
@@ -370,7 +363,7 @@
 (defmethod algo-w :the-var
   ;;  "Handles :the-var special form.
   ;;  The schema of a :the-var expression is always `var?`."
-  [_ _env _defined-typeclasses]
+  [_ _env]
   {::subs   {}
    ::schema {:type 'var?}})
 
@@ -379,7 +372,7 @@
   ;;  The schema of a :throw expression is the special keyword `::throw`.
   ;;  A TODO notes that type checking the thrown exception (confirming it's a
   ;;  subtype of Throwable) should be implemented."
-  [_ _env _defined-typeclasses]
+  [_ _env]
   ;; @todo Should type check the `exception` child AST, and confirm subtype of Throwable.
   {::subs {} ::schema ::throw})
 
@@ -389,16 +382,16 @@
   ;;  TODO: Type checking for :catch clauses (ensuring the body of the :catch
   ;;  unifies with the body of the :try, and that caught exceptions are subtypes
   ;;  of Throwable) should be implemented."
-  [{:keys [body]} env defined-typeclasses]
+  [{:keys [body]} env]
   ;; @todo Type check the catch clauses.
-  (algo-w body env defined-typeclasses))
+  (algo-w body env))
 
 (defmethod algo-w :var
   ;;  "Handles :var expressions, which refer to Clojure vars.
   ;;  Delegates to the :VAR method (uppercase keyword) by creating a
   ;;  :VAR AST node with the var's symbol."
-  [{:keys [var]} env defined-typeclasses]
-  (algo-w {:op :VAR :sym var} env defined-typeclasses))
+  [{:keys [var]} env]
+  (algo-w {:op :VAR :sym var} env))
 
 ;(defmethod algo-w :vector [{:keys [items]} env])
 
@@ -406,5 +399,5 @@
   ;;  "Handles :with-meta expressions.
   ;;  Infers the schema of the underlying expression, as metadata does not affect
   ;;  the core schema of a value."
-  [{:keys [expr]} env defined-typeclasses]
-  (algo-w expr env defined-typeclasses))
+  [{:keys [expr]} env]
+  (algo-w expr env))
