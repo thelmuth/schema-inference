@@ -21,20 +21,25 @@
   (fn [s] (if (ground? s) :ground (:type s))))
 
 (defmethod free-type-vars :ground
-  "Ground types have no free type variables."
+  ;; "Ground types have no free type variables."
   [_] #{})
+
 (defn- free-type-vars-ctor1 [{:keys [child]}] (free-type-vars child))
+
 (defmethod free-type-vars :vector
-  "Free variables in a :vector schema are those in its child schema."
+  ;; "Free variables in a :vector schema are those in its child schema."
   [schema] (free-type-vars-ctor1 schema))
+
 (defmethod free-type-vars :set
-  "Free variables in a :set schema are those in its child schema."
+  ;; "Free variables in a :set schema are those in its child schema."
   [schema] (free-type-vars-ctor1 schema))
+
 (defmethod free-type-vars :sequential
-  "Free variables in a :sequential schema are those in its child schema."
+  ;; "Free variables in a :sequential schema are those in its child schema."
   [schema] (free-type-vars-ctor1 schema))
+
 (defmethod free-type-vars :maybe
-  "Free variables in a :maybe schema are those in its child schema."
+  ;; "Free variables in a :maybe schema are those in its child schema."
   [schema] (free-type-vars-ctor1 schema))
 
 (defn- free-type-vars-ctorN
@@ -42,33 +47,34 @@
   (reduce #(set/union %1 (free-type-vars %2)) #{} children))
 
 (defmethod free-type-vars :tuple
-  "Free variables in a :tuple schema are the union of free variables in its children schemas."
+  ;; "Free variables in a :tuple schema are the union of free variables in its children schemas."
   [schema] (free-type-vars-ctorN schema))
+
 (defmethod free-type-vars :cat
-  "Free variables in a :cat schema (category, typically for function inputs)
-  are the union of free variables in its children schemas."
+  ;; "Free variables in a :cat schema (category, typically for function inputs)
+  ;are the union of free variables in its children schemas."
   [schema] (free-type-vars-ctorN schema))
 
 (defmethod free-type-vars :map-of
-  "Free variables in a :map-of schema are the union of free variables
-  in its key and value schemas."
+  ;; "Free variables in a :map-of schema are the union of free variables
+  ;in its key and value schemas."
   [{:keys [key value]}]
   (set/union (free-type-vars key) (free-type-vars value)))
 
 (defmethod free-type-vars :=>
-  "Free variables in a function schema (:=>) are the union of free variables
-  in its input and output schemas."
+  ;; "Free variables in a function schema (:=>) are the union of free variables
+  ;; in its input and output schemas."
   [{:keys [input output]}]
   (set/union (free-type-vars input) (free-type-vars output)))
 
 (defmethod free-type-vars :s-var
-  "The free variable in a schema variable (:s-var) is the symbol of the
-  schema variable itself."
+  ;; "The free variable in a schema variable (:s-var) is the symbol of the
+  ;; schema variable itself."
   [{:keys [sym]}] #{sym})
 
 (defmethod free-type-vars :scheme
-  "Free variables in a scheme (:scheme) are those in its body,
-  excluding the scheme's own quantified variables (:s-vars)."
+  ;; "Free variables in a scheme (:scheme) are those in its body,
+  ;; excluding the scheme's own quantified variables (:s-vars)."
   [{:keys [s-vars body]}]
   (set/difference (free-type-vars body)
                   (set (map :sym s-vars))))
@@ -96,24 +102,24 @@
   (fn [_ x] (if (ground? x) :ground (:type x))))
 
 (defmethod substitute :ground
-  "For ground types, attempts to map the :type to a canonical ground type
-  predicate (e.g., :int -> 'int?) if present in `g/canonical-ground`.
-  Otherwise, the type is returned as is. No actual substitution of schema
-  variables occurs as ground types do not contain them."
+  ;; "For ground types, attempts to map the :type to a canonical ground type
+  ;; predicate (e.g., :int -> 'int?) if present in `g/canonical-ground`.
+  ;; Otherwise, the type is returned as is. No actual substitution of schema
+  ;; variables occurs as ground types do not contain them."
   [_ schema]
   (update schema :type #(get g/canonical-ground % %)))
 
 (defmethod substitute :=>
-  "Substitutes type variables in the input and output schemas of a function schema (:=>)."
+  ;; "Substitutes type variables in the input and output schemas of a function schema (:=>)."
   [subs {:keys [input output]}]
   {:type   :=>
    :input  (substitute subs input)
    :output (substitute subs output)})
 
 (defmethod substitute :s-var
-  "For a schema variable (:s-var), if its symbol is found as a key in the
-  substitution map (`subs`), it is replaced with the corresponding schema.
-  Otherwise, the schema variable is returned unchanged."
+  ;; "For a schema variable (:s-var), if its symbol is found as a key in the
+  ;; substitution map (`subs`), it is replaced with the corresponding schema.
+  ;; Otherwise, the schema variable is returned unchanged."
   [subs s-var]
   (get subs (:sym s-var) s-var))
 
@@ -122,16 +128,16 @@
   (assoc schema :child (substitute subs child)))
 
 (defmethod substitute :vector
-  "Substitutes type variables in the child schema of a :vector schema."
+  ;; "Substitutes type variables in the child schema of a :vector schema."
   [subs schema] (substitute-ctor1 subs schema))
 (defmethod substitute :set
-  "Substitutes type variables in the child schema of a :set schema."
+  ;; "Substitutes type variables in the child schema of a :set schema."
   [subs schema] (substitute-ctor1 subs schema))
 (defmethod substitute :sequential
-  "Substitutes type variables in the child schema of a :sequential schema."
+  ;; "Substitutes type variables in the child schema of a :sequential schema."
   [subs schema] (substitute-ctor1 subs schema))
 (defmethod substitute :maybe
-  "Substitutes type variables in the child schema of a :maybe schema."
+  ;; "Substitutes type variables in the child schema of a :maybe schema."
   [subs schema] (substitute-ctor1 subs schema))
 
 (defn- substitute-ctorN
@@ -139,25 +145,25 @@
   (assoc schema :children (mapv #(substitute subs %) children)))
 
 (defmethod substitute :tuple
-  "Substitutes type variables in all children schemas of a :tuple schema."
+  ;; "Substitutes type variables in all children schemas of a :tuple schema."
   [subs schema] (substitute-ctorN subs schema))
 (defmethod substitute :cat
-  "Substitutes type variables in all children schemas of a :cat schema."
+  ;; "Substitutes type variables in all children schemas of a :cat schema."
   [subs schema] (substitute-ctorN subs schema))
 
 (defmethod substitute :map-of
-  "Substitutes type variables in the key and value schemas of a :map-of schema."
+  ;; "Substitutes type variables in the key and value schemas of a :map-of schema."
   [subs {:keys [key value] :as map-of}]
   (assoc map-of
     :key (substitute subs key)
     :value (substitute subs value)))
 
 (defmethod substitute :scheme
-  "Substitutes type variables in the body of a scheme (:scheme).
-  Crucially, the scheme's own quantified variables (:s-vars) are removed
-  from the substitution map (`subs`) before substituting into the body.
-  This prevents accidental substitution of locally bound type variables
-  if they happen to have the same symbols as free variables in `subs`."
+  ;; "Substitutes type variables in the body of a scheme (:scheme).
+  ;; Crucially, the scheme's own quantified variables (:s-vars) are removed
+  ;; from the substitution map (`subs`) before substituting into the body.
+  ;; This prevents accidental substitution of locally bound type variables
+  ;; if they happen to have the same symbols as free variables in `subs`."
   [subs {:keys [s-vars body] :as scheme}]
   (assoc scheme
     :body (substitute (apply dissoc subs (map :sym s-vars))
@@ -196,17 +202,17 @@
   :type)
 
 (defmethod instantiate :scheme
-  "For a type scheme (:scheme), replaces its quantified type variables (:s-vars)
-  within its body with new, unique (gensym'd) schema variables.
-  This effectively creates a fresh copy of the scheme's body with new variables."
+  ;; "For a type scheme (:scheme), replaces its quantified type variables (:s-vars)
+  ;; within its body with new, unique (gensym'd) schema variables.
+  ;; This effectively creates a fresh copy of the scheme's body with new variables."
   [{:keys [s-vars body]}]
   (let [fresh-vars (repeatedly (count s-vars) (fn [] {:type :s-var :sym (gensym "s-")}))
         subs (zipmap (map :sym s-vars) fresh-vars)]
     (substitute subs body)))
 
 (defmethod instantiate :default
-  "Default case for instantiate: if the schema is not a type scheme,
-  it is returned unchanged as there are no quantified variables to instantiate."
+  ;; "Default case for instantiate: if the schema is not a type scheme,
+  ;; it is returned unchanged as there are no quantified variables to instantiate."
   [schema] schema)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -277,16 +283,17 @@
     :else {sym schema}))
 
 (defmethod mgu [:s-var :_]
-  "Unifies a schema variable `a` with schema `b`.
-  It attempts to bind the variable `a` to `b`.
-  Fails (occurs-check) if `a` is already free in `b`.
-  If `a` and `b` are identical, returns an empty substitution."
+  ;; "Unifies a schema variable `a` with schema `b`.
+  ;; It attempts to bind the variable `a` to `b`.
+  ;; Fails (occurs-check) if `a` is already free in `b`.
+  ;; If `a` and `b` are identical, returns an empty substitution."
   [a b] (bind-var a b))
+
 (defmethod mgu [:_ :s-var]
-  "Unifies schema `a` with a schema variable `b`.
-  It attempts to bind the variable `b` to `a`.
-  Fails (occurs-check) if `b` is already free in `a`.
-  If `a` and `b` are identical, returns an empty substitution."
+  ;; "Unifies schema `a` with a schema variable `b`.
+  ;; It attempts to bind the variable `b` to `a`.
+  ;; Fails (occurs-check) if `b` is already free in `a`.
+  ;; If `a` and `b` are identical, returns an empty substitution."
   [a b] (bind-var b a))
 
 (defn- mgu-schema-ctor1
@@ -298,20 +305,23 @@
     (mgu a-child b-child)))
 
 (defmethod mgu [:vector :vector]
-  "Unifies two :vector schemas by unifying their child schemas.
-  Fails if the schema constructors themselves do not match (handled by mgu-schema-ctor1)."
+  ;; "Unifies two :vector schemas by unifying their child schemas.
+  ;; Fails if the schema constructors themselves do not match (handled by mgu-schema-ctor1)."
   [a b] (mgu-schema-ctor1 a b))
+
 (defmethod mgu [:set :set]
-  "Unifies two :set schemas by unifying their child schemas.
-  Fails if the schema constructors themselves do not match (handled by mgu-schema-ctor1)."
+  ;; "Unifies two :set schemas by unifying their child schemas.
+  ;; Fails if the schema constructors themselves do not match (handled by mgu-schema-ctor1)."
   [a b] (mgu-schema-ctor1 a b))
+
 (defmethod mgu [:sequential :sequential]
-  "Unifies two :sequential schemas by unifying their child schemas.
-  Fails if the schema constructors themselves do not match (handled by mgu-schema-ctor1)."
+  ;; "Unifies two :sequential schemas by unifying their child schemas.
+  ;; Fails if the schema constructors themselves do not match (handled by mgu-schema-ctor1)."
   [a b] (mgu-schema-ctor1 a b))
+
 (defmethod mgu [:maybe :maybe]
-  "Unifies two :maybe schemas by unifying their child schemas.
-  Fails if the schema constructors themselves do not match (handled by mgu-schema-ctor1)."
+  ;; "Unifies two :maybe schemas by unifying their child schemas.
+  ;; Fails if the schema constructors themselves do not match (handled by mgu-schema-ctor1)."
   [a b] (mgu-schema-ctor1 a b))
 
 (defn- mgu-schema-ctorN
@@ -339,21 +349,22 @@
                  {}))))
 
 (defmethod mgu [:tuple :tuple]
-  "Unifies two :tuple schemas by unifying their children schemas element-wise.
-  Fails if schema constructors or arity (number of children) do not match
-  (handled by mgu-schema-ctorN)."
+  ;; "Unifies two :tuple schemas by unifying their children schemas element-wise.
+  ;; Fails if schema constructors or arity (number of children) do not match
+  ;; (handled by mgu-schema-ctorN)."
   [a b] (mgu-schema-ctorN a b))
+
 (defmethod mgu [:cat :cat]
-  "Unifies two :cat schemas by unifying their children schemas element-wise.
-  Fails if schema constructors or arity (number of children) do not match
-  (handled by mgu-schema-ctorN)."
+  ;; "Unifies two :cat schemas by unifying their children schemas element-wise.
+  ;; Fails if schema constructors or arity (number of children) do not match
+  ;; (handled by mgu-schema-ctorN)."
   [a b] (mgu-schema-ctorN a b))
 
 (defmethod mgu [:map-of :map-of]
-  "Unifies two :map-of schemas.
-  First, it unifies their key schemas. Then, it applies the resulting substitution
-  to the value schemas and unifies them. The final MGU is the composition
-  of substitutions from key and value unification."
+  ;; "Unifies two :map-of schemas.
+  ;; First, it unifies their key schemas. Then, it applies the resulting substitution
+  ;; to the value schemas and unifies them. The final MGU is the composition
+  ;; of substitutions from key and value unification."
   [{a-key :key a-value :value} {b-key :key b-value :value}]
   (with-mgu a-key b-key
             (fn [key-subs]
@@ -363,11 +374,11 @@
                           (compose-substitutions value-subs key-subs))))))
 
 (defmethod mgu [:=> :=>]
-  "Unifies two function schemas (:=>).
-  It requires both input schemas to be of type :cat. It first unifies the
-  input schemas. Then, it applies the resulting substitution to the output
-  schemas and unifies them. The final MGU is the composition of these substitutions.
-  Fails if input types are not :cat or if unification at any step fails."
+  ;; "Unifies two function schemas (:=>).
+  ;; It requires both input schemas to be of type :cat. It first unifies the
+  ;; input schemas. Then, it applies the resulting substitution to the output
+  ;; schemas and unifies them. The final MGU is the composition of these substitutions.
+  ;; Fails if input types are not :cat or if unification at any step fails."
   [{a-input :input a-output :output :as a} {b-input :input b-output :output :as b}]
   ;; @todo Support other function args (named, variatic) aside from :cat
   (if (or (not= (:type a-input) :cat)
@@ -382,10 +393,10 @@
                           #(compose-substitutions % subs))))))
 
 (defmethod mgu :default
-  "Default unification rule: two schemas can unify if and only if they are identical.
-  This typically applies to ground types or other schemas not handled by more
-  specific MGU methods. Returns an empty substitution for identical schemas,
-  or an MGU failure if they are not equal."
+  ;; "Default unification rule: two schemas can unify if and only if they are identical.
+  ;; This typically applies to ground types or other schemas not handled by more
+  ;; specific MGU methods. Returns an empty substitution for identical schemas,
+  ;; or an MGU failure if they are not equal."
   [a b]
   (if (= a b)
     {}
@@ -421,18 +432,18 @@
   sub-schema?-dispatch)
 
 (defmethod sub-schema? :default
-  "Default behavior for sub-schema checking.
-  Currently throws an exception indicating that sub-schema checking is not
-  yet supported for the given combination of non-class schema types.
-  This typically means at least one of the schemas is not a Java class type,
-  and no specific sub-typing rule has been defined for their types."
+  ;; "Default behavior for sub-schema checking.
+  ;; Currently throws an exception indicating that sub-schema checking is not
+  ;; yet supported for the given combination of non-class schema types.
+  ;; This typically means at least one of the schemas is not a Java class type,
+  ;; and no specific sub-typing rule has been defined for their types."
   [sub sup]
   (throw (ex-info "sub-schema? not yet supported for non-class schemas."
                   {:sub sub :sup sup})))
 
 (defmethod sub-schema? [:class :class]
-  "Checks if a class schema `sub-type` is a sub-schema of another class
-  schema `sup-type`. This is true if `sub-type` is the same as `sup-type`
-  or a subclass of `sup-type`, as determined by `clojure.core/supers`."
+  ;; "Checks if a class schema `sub-type` is a sub-schema of another class
+  ;; schema `sup-type`. This is true if `sub-type` is the same as `sup-type`
+  ;; or a subclass of `sup-type`, as determined by `clojure.core/supers`."
   [{sub-type :type} {sup-type :type}]
   (contains? (supers sub-type) sup-type))
