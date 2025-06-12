@@ -1,6 +1,7 @@
 (ns erp12.schema-inference.impl.util
   (:require [clojure.set :as set]
-            [erp12.schema-inference.impl.ground :as g]))
+            [erp12.schema-inference.impl.ground :as g]
+            [erp12.schema-inference.impl.typeclasses :as tc]))
 
 (defn ground?
   "Checks if a given schema represents a ground type.
@@ -89,6 +90,40 @@
   (reduce #(set/union %1 (free-type-vars (val %2)))
           #{}
           env))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defmulti get-free-s-vars-defs
+  "Returns a set of free type variable definitions (maps like {:sym 'a :typeclasses [...]})
+  within a given schema. Dispatch is based on the schema's :type."
+  (fn [s] (if (ground? s) :ground (:type s))))
+
+(defmethod get-free-s-vars-defs :ground [_] #{})
+
+(defn- get-free-s-vars-defs-ctor1 [{:keys [child]}] (get-free-s-vars-defs child))
+
+(defmethod get-free-s-vars-defs :vector [schema] (get-free-s-vars-defs-ctor1 schema))
+(defmethod get-free-s-vars-defs :set [schema] (get-free-s-vars-defs-ctor1 schema))
+(defmethod get-free-s-vars-defs :sequential [schema] (get-free-s-vars-defs-ctor1 schema))
+(defmethod get-free-s-vars-defs :maybe [schema] (get-free-s-vars-defs-ctor1 schema))
+
+(defn- get-free-s-vars-defs-ctorN [{:keys [children]}]
+  (reduce #(set/union %1 (get-free-s-vars-defs %2)) #{} children))
+
+(defmethod get-free-s-vars-defs :tuple [schema] (get-free-s-vars-defs-ctorN schema))
+(defmethod get-free-s-vars-defs :cat [schema] (get-free-s-vars-defs-ctorN schema))
+
+(defmethod get-free-s-vars-defs :map-of [{:keys [key value]}]
+  (set/union (get-free-s-vars-defs key) (get-free-s-vars-defs value)))
+
+(defmethod get-free-s-vars-defs :=> [{:keys [input output]}]
+  (set/union (get-free-s-vars-defs input) (get-free-s-vars-defs output)))
+
+(defmethod get-free-s-vars-defs :s-var [s-var-def] #{s-var-def})
+
+(defmethod get-free-s-vars-defs :scheme [{:keys [s-vars body]}]
+  (set/difference (get-free-s-vars-defs body)
+                  (set s-vars)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -206,7 +241,10 @@
   ;; within its body with new, unique (gensym'd) schema variables.
   ;; This effectively creates a fresh copy of the scheme's body with new variables."
   [{:keys [s-vars body]}]
-  (let [fresh-vars (repeatedly (count s-vars) (fn [] {:type :s-var :sym (gensym "s-")}))
+  (let [fresh-vars (mapv (fn [s-var]
+                           (cond-> {:type :s-var :sym (gensym "s-")}
+                             (:typeclasses s-var) (assoc :typeclasses (:typeclasses s-var))))
+                         s-vars)
         subs (zipmap (map :sym s-vars) fresh-vars)]
     (substitute subs body)))
 
@@ -226,27 +264,116 @@
   free in the environment or the schema has no free variables), it returns the
   original schema without creating a scheme."
   [env schema]
-  (let [schema (instantiate schema)
-        s-vars (sort (set/difference (free-type-vars schema) (free-type-vars-env env)))]
-    (if (empty? s-vars)
-      schema
+  (let [schema-instance (instantiate schema) ; avoid calling instantiate on already instantiated schema
+        env-free-vars-syms (free-type-vars-env env)
+        schema-free-s-vars-defs (get-free-s-vars-defs schema-instance)
+        s-var-defs-to-generalize (filter #(not (contains? env-free-vars-syms (:sym %)))
+                                         schema-free-s-vars-defs)
+        sorted-s-var-defs (sort-by :sym (vec s-var-defs-to-generalize))]
+    (if (empty? sorted-s-var-defs)
+      schema-instance
       {:type   :scheme
-       :s-vars (vec (map (fn [sym] {:sym sym}) s-vars))
-       :body   schema})))
+       :s-vars sorted-s-var-defs
+       :body   schema-instance})))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defn satisfies-all-typeclasses?
+  "Checks if a given schema satisfies a collection of typeclass keywords.
+  - schema: The schema to check.
+  - typeclass-keywords: A collection of keywords (e.g., [:number :comparable]).
+  - defined-typeclasses: The map of typeclass definitions."
+  [schema typeclass-keywords defined-typeclasses]
+  (if (or (empty? typeclass-keywords) (nil? typeclass-keywords))
+    true ; No constraints to satisfy
+    (let [schema-type (:type schema)]
+      (every?
+       (fn [tc-keyword]
+         (if-let [allowed-types (get defined-typeclasses tc-keyword)]
+           (cond
+             ;; Case 1: Schema is a ground type
+             (ground? schema)
+             (contains? allowed-types schema-type)
+
+             ;; Case 2: Schema is a structured type (e.g., :vector, :map-of)
+             (keyword? schema-type) ; Includes :s-var, :vector, :map-of, :=> etc.
+             (if (= schema-type :s-var)
+               ;; Case 2a: Schema is another schematic variable
+               (let [target-s-var-typeclasses (set (:typeclasses schema))]
+                 (if (empty? target-s-var-typeclasses)
+                   true ; Target s-var is fully polymorphic, satisfies any constraint
+                   ;; The required typeclass tc-keyword must be among the target s-var's typeclasses.
+                   ;; This interpretation means an s-var {:typeclasses [:A :B]} satisfies a check for :A, and also for :B
+                   ;; but a check for [:A :C] would fail if the s-var doesn't have :C.
+                   ;; The problem states: "each typeclass in typeclass-keywords (from the first variable)
+                   ;; must also be present in s-var2's typeclasses". This is slightly different.
+                   ;; Let's re-evaluate the s-var logic based on the prompt.
+                   ;; The prompt is: "each typeclass in `typeclass-keywords` (from the first variable)
+                   ;; must also be present in `s-var2`'s typeclasses."
+                   ;; This implies `s-var2`'s typeclasses must be a superset of the required ones for this specific check.
+                   ;; However, the overall check is `every?` over `typeclass-keywords`.
+                   ;; So for each `tc-keyword` in `typeclass-keywords`, we check `s-var2`.
+                   ;; If `s-var2` has no typeclasses, it's true.
+                   ;; If `s-var2` has typeclasses, then `tc-keyword` must be in `s-var2`'s typeclasses.
+
+                   ;; Let's refine s-var logic:
+                   (let [svar-constraints (set (:typeclasses schema))]
+                     (if (empty? svar-constraints)
+                       true ; s-var under check is unconstrained, so it satisfies this specific tc-keyword
+                       (contains? svar-constraints tc-keyword)))
+                   ;; This interpretation seems more aligned with checking one tc-keyword at a time.
+                   ;; The overall `every?` will ensure all are satisfied.
+                   ;; The prompt: "If s-var2 has typeclasses, then each typeclass in typeclass-keywords (from the first variable) must also be present in s-var2's typeclasses."
+                   ;; This condition should be applied if schema is an s-var.
+                   ;; The `every?` iterates `tc-keyword` from `typeclass-keywords`.
+                   ;; So, if schema is s-var, its typeclasses must contain the current `tc-keyword`.
+
+                   ;; Let's re-think s-var logic for clarity according to prompt:
+                   ;; "If schema is another schematic variable s-var2 ({:type :s-var :sym 'b :typeclasses [...]})":
+                   ;;   "If s-var2 has no typeclasses, it satisfies the constraint (it's fully polymorphic)."
+                   ;;   "If s-var2 *has* typeclasses, then each typeclass in typeclass-keywords (from the first variable)
+                   ;;    must also be present in s-var2's typeclasses."
+                   ;; This means `(:typeclasses s-var2)` must be a superset of `typeclass-keywords`.
+                   ;; This check should happen *once* for an s-var, not for each tc-keyword.
+                   ;; So, the structure needs adjustment for s-vars.
+
+                   ;; Corrected structure for s-var check:
+                   ;; This entire `satisfies-all-typeclasses?` is called when s-var1 has constraints.
+                   ;; `typeclass-keywords` are the constraints from s-var1.
+                   ;; `schema` is s-var2.
+                   (if (= schema-type :s-var)
+                     (let [svar2-typeclasses (set (:typeclasses schema))]
+                       (if (empty? svar2-typeclasses)
+                         true ; s-var2 is unconstrained
+                         (set/subset? (set typeclass-keywords) svar2-typeclasses)))
+                     ;; else, it's a concrete type or structured type, check current tc-keyword
+                     (contains? allowed-types schema-type)))
+
+
+             ;; Case 3: Schema is a class type
+             (class? schema-type)
+             (contains? allowed-types schema-type)
+
+
+             :else false)) ; Schema type not recognized
+           false)) ; Typeclass keyword not found in definitions
+       typeclass-keywords))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Most General Unifier
 
 (defn- mgu-dispatch
-  [{a-type :type :as a} {b-type :type :as b}]
+  "Dispatch function for mgu. Now takes an additional `defined-typeclasses` arg,
+  but dispatch is only on the first two schemas a and b."
+  [a b _defined-typeclasses]
   (cond
-    (and (= a-type :maybe)
-         (= b-type :maybe))
+    (and (= (:type a) :maybe)
+         (= (:type b) :maybe))
     [:maybe :maybe]
 
-    (= a-type :s-var) [:s-var :_]
-    (= b-type :s-var) [:_ :s-var]
-    :else [a-type b-type]))
+    (= (:type a) :s-var) [:s-var :_]
+    (= (:type b) :s-var) [:_ :s-var]
+    :else [(:type a) (:type b)]))
 
 (defn mgu-failure?
   "Checks if a given result `x` from an MGU computation indicates a failure.
@@ -255,7 +382,8 @@
   (and (map? x) (some? (:mgu-failure x))))
 
 (defmulti mgu
-  "Computes the Most General Unifier (MGU) for two schemas, `a` and `b`.
+  "Computes the Most General Unifier (MGU) for two schemas, `a` and `b`,
+  considering typeclass constraints.
   The MGU is a substitution map that, when applied to both `a` and `b`,
   makes them identical. If no such substitution exists, it returns a map
   indicating an MGU failure (see `mgu-failure?`).
@@ -263,15 +391,18 @@
   handling schema variables (:s-var) specially."
   mgu-dispatch)
 
+;; Helper to simplify passing defined-typeclasses to recursive mgu calls
 (defn- with-mgu
-  [schema1 schema2 fn]
-  (let [result (mgu schema1 schema2)]
+  [schema1 schema2 defined-typeclasses മതresult-fn]
+  (let [result (mgu schema1 schema2 defined-typeclasses)]
     (if (mgu-failure? result)
       result
-      (fn result))))
+      (mതresult-fn result))))
 
 (defn- bind-var
-  [{:keys [sym] :as s-var} schema]
+  "Attempts to bind schematic variable s-var to schema.
+  Performs occurs check and typeclass compatibility check."
+  [{:keys [sym typeclasses] :as s-var} schema defined-typeclasses]
   (cond
     (= s-var schema) {}
 
@@ -280,53 +411,49 @@
      :schema-1    s-var
      :schema-2    schema}
 
+    ;; Typeclass check
+    (and (not-empty typeclasses)
+         (not (satisfies-all-typeclasses? schema typeclasses defined-typeclasses)))
+    (let [violated-typeclasses (filterv #(not (satisfies-all-typeclasses? schema [%] defined-typeclasses)) typeclasses)]
+      {:mgu-failure       :typeclass-mismatch
+       :s-var             s-var
+       :schema            schema
+       :missing-typeclasses violated-typeclasses})
+
     :else {sym schema}))
 
 (defmethod mgu [:s-var :_]
-  ;; "Unifies a schema variable `a` with schema `b`.
-  ;; It attempts to bind the variable `a` to `b`.
-  ;; Fails (occurs-check) if `a` is already free in `b`.
-  ;; If `a` and `b` are identical, returns an empty substitution."
-  [a b] (bind-var a b))
+  ;; "Unifies a schema variable `a` with schema `b`."
+  [a b defined-typeclasses] (bind-var a b defined-typeclasses))
 
 (defmethod mgu [:_ :s-var]
-  ;; "Unifies schema `a` with a schema variable `b`.
-  ;; It attempts to bind the variable `b` to `a`.
-  ;; Fails (occurs-check) if `b` is already free in `a`.
-  ;; If `a` and `b` are identical, returns an empty substitution."
-  [a b] (bind-var b a))
+  ;; "Unifies schema `a` with a schema variable `b`."
+  [a b defined-typeclasses] (bind-var b a defined-typeclasses))
 
 (defn- mgu-schema-ctor1
-  [{a-type :type a-child :child :as a} {b-type :type b-child :child :as b}]
+  [{a-type :type a-child :child :as a} {b-type :type b-child :child :as b} defined-typeclasses]
   (if (not= a-type b-type)
     {:mgu-failure :mismatched-schema-ctor
      :schema-1    a
      :schema-2    b}
-    (mgu a-child b-child)))
+    (mgu a-child b-child defined-typeclasses)))
 
 (defmethod mgu [:vector :vector]
-  ;; "Unifies two :vector schemas by unifying their child schemas.
-  ;; Fails if the schema constructors themselves do not match (handled by mgu-schema-ctor1)."
-  [a b] (mgu-schema-ctor1 a b))
+  [a b defined-typeclasses] (mgu-schema-ctor1 a b defined-typeclasses))
 
 (defmethod mgu [:set :set]
-  ;; "Unifies two :set schemas by unifying their child schemas.
-  ;; Fails if the schema constructors themselves do not match (handled by mgu-schema-ctor1)."
-  [a b] (mgu-schema-ctor1 a b))
+  [a b defined-typeclasses] (mgu-schema-ctor1 a b defined-typeclasses))
 
 (defmethod mgu [:sequential :sequential]
-  ;; "Unifies two :sequential schemas by unifying their child schemas.
-  ;; Fails if the schema constructors themselves do not match (handled by mgu-schema-ctor1)."
-  [a b] (mgu-schema-ctor1 a b))
+  [a b defined-typeclasses] (mgu-schema-ctor1 a b defined-typeclasses))
 
 (defmethod mgu [:maybe :maybe]
-  ;; "Unifies two :maybe schemas by unifying their child schemas.
-  ;; Fails if the schema constructors themselves do not match (handled by mgu-schema-ctor1)."
-  [a b] (mgu-schema-ctor1 a b))
+  [a b defined-typeclasses] (mgu-schema-ctor1 a b defined-typeclasses))
 
 (defn- mgu-schema-ctorN
   [{a-type :type a-children :children :as a}
-   {b-type :type b-children :children :as b}]
+   {b-type :type b-children :children :as b}
+   defined-typeclasses]
   (cond
     (not= a-type b-type)
     {:mgu-failure :mismatched-schema-ctor
@@ -345,59 +472,44 @@
                      subs
                      (with-mgu (substitute subs a-child)
                                (substitute subs b-child)
+                               defined-typeclasses
                                #(compose-substitutions % subs))))
                  {}))))
 
 (defmethod mgu [:tuple :tuple]
-  ;; "Unifies two :tuple schemas by unifying their children schemas element-wise.
-  ;; Fails if schema constructors or arity (number of children) do not match
-  ;; (handled by mgu-schema-ctorN)."
-  [a b] (mgu-schema-ctorN a b))
+  [a b defined-typeclasses] (mgu-schema-ctorN a b defined-typeclasses))
 
 (defmethod mgu [:cat :cat]
-  ;; "Unifies two :cat schemas by unifying their children schemas element-wise.
-  ;; Fails if schema constructors or arity (number of children) do not match
-  ;; (handled by mgu-schema-ctorN)."
-  [a b] (mgu-schema-ctorN a b))
+  [a b defined-typeclasses] (mgu-schema-ctorN a b defined-typeclasses))
 
 (defmethod mgu [:map-of :map-of]
-  ;; "Unifies two :map-of schemas.
-  ;; First, it unifies their key schemas. Then, it applies the resulting substitution
-  ;; to the value schemas and unifies them. The final MGU is the composition
-  ;; of substitutions from key and value unification."
-  [{a-key :key a-value :value} {b-key :key b-value :value}]
-  (with-mgu a-key b-key
+  [{a-key :key a-value :value} {b-key :key b-value :value} defined-typeclasses]
+  (with-mgu a-key b-key defined-typeclasses
             (fn [key-subs]
               (with-mgu (substitute key-subs a-value)
                         (substitute key-subs b-value)
+                        defined-typeclasses
                         (fn [value-subs]
                           (compose-substitutions value-subs key-subs))))))
 
 (defmethod mgu [:=> :=>]
-  ;; "Unifies two function schemas (:=>).
-  ;; It requires both input schemas to be of type :cat. It first unifies the
-  ;; input schemas. Then, it applies the resulting substitution to the output
-  ;; schemas and unifies them. The final MGU is the composition of these substitutions.
-  ;; Fails if input types are not :cat or if unification at any step fails."
-  [{a-input :input a-output :output :as a} {b-input :input b-output :output :as b}]
+  [{a-input :input a-output :output :as a} {b-input :input b-output :output :as b} defined-typeclasses]
   ;; @todo Support other function args (named, variatic) aside from :cat
   (if (or (not= (:type a-input) :cat)
           (not= (:type b-input) :cat))
     {:mgu-failure :non-positional-args
      :schema-1    a
      :schema-2    b}
-    (with-mgu a-input b-input
+    (with-mgu a-input b-input defined-typeclasses
               (fn [subs]
                 (with-mgu (substitute subs a-output)
                           (substitute subs b-output)
+                          defined-typeclasses
                           #(compose-substitutions % subs))))))
 
 (defmethod mgu :default
-  ;; "Default unification rule: two schemas can unify if and only if they are identical.
-  ;; This typically applies to ground types or other schemas not handled by more
-  ;; specific MGU methods. Returns an empty substitution for identical schemas,
-  ;; or an MGU failure if they are not equal."
-  [a b]
+  ;; "Default unification rule: two schemas can unify if and only if they are identical."
+  [a b _defined-typeclasses]
   (if (= a b)
     {}
     {:schema-1    a
