@@ -361,7 +361,7 @@
     (let [{other-sym :sym other-tcs :typeclasses} schema
           merged-tcs (set/union typeclasses other-tcs)
           ;; You can choose to keep one of the names or generate a fresh one
-          new-sym (gensym "s")
+          new-sym (gensym "s-")
           new-svar {:type :s-var :sym new-sym :typeclasses merged-tcs}]
       {sym new-svar
        other-sym new-svar})
