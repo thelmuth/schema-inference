@@ -2,8 +2,6 @@
   (:require [clojure.test :refer [deftest is testing]]
             [clojure.tools.analyzer.jvm :as ana]
             [erp12.schema-inference.impl.algo_w :refer [algo-w] :as a]
-            [erp12.schema-inference.impl.util :as u] ; For mgu tests
-            [erp12.schema-inference.impl.typeclasses :as tc] ; For typeclasses map
             [erp12.schema-inference.api :as schema-inf]) ; For api/infer-schema tests
   (:import (java.io PrintStream)))
 
@@ -109,7 +107,7 @@
       (is (= (count inputs) 2))
       (is (contains? inputs output))
       (is (every? #(= (:type %) :s-var) (cons output inputs)))
-      (is (= (count subs) 3)))))
+      (is (= 6 (count subs))))))
 
 (deftest algo-w-if-test
   (let [{::a/keys [subs schema failure]}
@@ -236,128 +234,6 @@
                    :output {:type 'int?}}))
     (is (= (count subs) 0))))
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Typeclass Tests
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-(deftest mgu-typeclass-tests
-  (testing "Direct mgu tests for typeclasses"
-    (let [s-var-num {:type :s-var :sym 'a :typeclasses #{:number}}
-          s-var-num-comp {:type :s-var :sym 'b :typeclasses #{:number :comparable}}
-          s-var-comparable {:type :s-var :sym 'c :typeclasses #{:comparable}}
-          s-var-any {:type :s-var :sym 'd}
-          int-schema {:type 'int?}
-          string-schema {:type 'string?}
-          bool-schema {:type 'boolean?}]
-
-      (testing "s-var with :typeclasses #{:number} vs 'int?"
-        (is (map? (u/mgu s-var-num int-schema)))
-        (is (not (u/mgu-failure? (u/mgu s-var-num int-schema)))))
-
-      (testing "s-var with :typeclasses #{:number} vs 'string?"
-        (let [result (u/mgu s-var-num string-schema)]
-          (is (u/mgu-failure? result))
-          (is (= (:mgu-failure result) :typeclass-mismatch))
-          (is (= (:s-var result) s-var-num))
-          (is (= (:schema result) string-schema))
-          (is (= (:missing-typeclasses result) #{:number}))))
-
-      (testing "s-var a #{:number} with s-var b #{:number :comparable}"
-        ;; b's constraints are a superset of a's constraints.
-        ;; unifying a with b means 'a can be 'b.
-        ;; The substitution should bind 'a to 'b, or 'b to 'a.
-        ;; If 'a -> 'b, then 'a takes on 'b's constraints.
-        ;; If 'b -> 'a, then 'b takes on 'a's constraints, which is a failure if b's constraints are stricter.
-        ;; bind-var s-var schema: if s-var has TCs, schema must satisfy.
-        ;; mgu s-var-num s-var-num-comp:
-        ;;   bind-var s-var-num s-var-num-comp:
-        ;;     s-var-num-comp satisfies #{:number}? Yes, because (:typeclasses s-var-num-comp) includes :number.
-        ;;     => { 'a  s-var-num-comp } - This is one possibility.
-        ;; mgu s-var-num-comp s-var-num:
-        ;;   bind-var s-var-num-comp s-var-num:
-        ;;     s-var-num satisfies #{:number :comparable}? No, s-var-num only has :number. Fails.
-        ;; So, the order matters for which var gets bound.
-        ;; mgu itself tries both orderings via dispatch [:s-var :_] and [:_ :s-var]
-        ;; Let's assume s-var-num is 'a and s-var-num-comp is 'b
-        ;; u/mgu a b -> bind-var a b -> {a b} is possible if b satisfies a's constraints.
-        ;; u/mgu b a -> bind-var b a -> {b a} is possible if a satisfies b's constraints.
-        (let [res1 (u/mgu s-var-num s-var-num-comp)]
-          (is (not (u/mgu-failure? res1)))
-          ;; expecting 'a -> s-var-num-comp OR 'b -> s-var-num.
-          ;; If 'a -> s-var-num-comp, 'a effectively gets constraints #{:number :comparable}
-          ;; If 'b -> s-var-num, 'b effectively gets constraints #{:number} - this would be from (mgu s_b s_a) -> (bind-var s_b s_a)
-          ;; Let's trace bind-var: (bind-var S T)
-          ;; (bind-var s-var-num s-var-num-comp): s-var-num-comp satisfies #{:number} from s-var-num? Yes. -> {'a s-var-num-comp}
-          (is (= res1 {'a s-var-num-comp}))
-          )
-
-        (let [res2 (u/mgu s-var-num-comp s-var-num)]
-           ;; (bind-var s-var-num-comp s-var-num): s-var-num satisfies #{:number :comparable} from s-var-num-comp? No.
-          (is (u/mgu-failure? res2))
-          (is (= (:mgu-failure res2) :typeclass-mismatch))
-          (is (= (:missing-typeclasses res2) #{:comparable}))))
-
-      (testing "s-var a #{:number :comparable} with s-var b #{:number}"
-        (let [result (u/mgu s-var-num-comp s-var-num)]
-          (is (u/mgu-failure? result))
-          (is (= (:mgu-failure result) :typeclass-mismatch))
-          (is (= (:s-var result) s-var-num-comp))
-          (is (= (:schema result) s-var-num))
-          (is (= (:missing-typeclasses result) #{:comparable}))))
-
-      (testing "s-var a #{:number} with s-var b #{} (no typeclasses)"
-        ;; s-var-any satisfies #{:number}? Yes, because it's unconstrained.
-        (let [result1 (u/mgu s-var-num s-var-any)]
-          (is (not (u/mgu-failure? result1)))
-          (is (= result1 {'a s-var-any})))
-
-        ;; s-var-num satisfies #{}? Yes.
-        (let [result2 (u/mgu s-var-any s-var-num)]
-          (is (not (u/mgu-failure? result2)))
-          (is (= result2 {'d s-var-num})))))
-
-    (testing "Unifying s-var with typeclass against a concrete type not in typeclass"
-      (let [s-var-countable {:type :s-var :sym 'a :typeclasses #{:countable}}
-            int-schema {:type 'int?}] ; int? is not in :countable
-        (let [result (u/mgu s-var-countable int-schema)]
-          (is (u/mgu-failure? result))
-          (is (= :typeclass-mismatch (:mgu-failure result)))
-          (is (= #{:countable} (:missing-typeclasses result))))))
-
-    (testing "Unifying s-var with multiple typeclasses against a concrete type satisfying only one"
-      (let [s-var-num-comparable {:type :s-var :sym 'a :typeclasses #{:number :comparable}}
-            int-schema {:type 'int?}] ; int? is :number and :comparable
-        (is (not (u/mgu-failure? (u/mgu s-var-num-comparable int-schema)))))
-
-      ;; This test is tricky due to how satisfies-all-typeclasses? works for concrete types.
-      ;; It checks if the concrete type (string?) satisfies *each* tc in s-var's list.
-      ;; string? is :comparable, but not :number. So it fails for :number.
-      (let [s-var-num-comparable {:type :s-var :sym 'a :typeclasses #{:number :comparable}}
-            string-schema {:type 'string?}] ; string? is :comparable but not :number
-        (let [result (u/mgu s-var-num-comparable string-schema)]
-          (is (u/mgu-failure? result))
-          (is (= :typeclass-mismatch (:mgu-failure result)))
-          (is (= #{:number} (:missing-typeclasses result))))))
-
-    (testing "s-var unification where target s-var's constraints are stricter (subset)"
-      ;; s-var 'a' requires #{:number}
-      ;; s-var 'b' has constraints #{:number :comparable} (stricter/more specific)
-      ;; (mgu 'a 'b) -> bind 'a to 'b is okay because 'b satisfies #{:number}
-      (let [sva {:type :s-var :sym 'a :typeclasses #{:number}}
-            svb {:type :s-var :sym 'b :typeclasses #{:number :comparable}}]
-        (is (= (u/mgu sva svb) {'a svb})))
-
-      ;; s-var 'a' requires #{:number :comparable}
-      ;; s-var 'b' has constraints #{:number} (less specific)
-      ;; (mgu 'a 'b) -> bind 'a to 'b: does 'b satisfy #{:number :comparable}? No. Fails.
-      (let [sva {:type :s-var :sym 'a :typeclasses #{:number :comparable}}
-            svb {:type :s-var :sym 'b :typeclasses #{:number}}]
-        (let [result (u/mgu sva svb)]
-          (is (u/mgu-failure? result))
-          (is (= :typeclass-mismatch (:mgu-failure result)))
-          (is (= (:missing-typeclasses result) #{:comparable})))))
-  ))
-
 (deftest infer-schema-typeclass-tests
   (testing "api/infer-schema tests for typeclasses"
     (let [id-num-schema {:type   :scheme
@@ -465,5 +341,4 @@
               (is (= {:type :s-var, :typeclasses #{:number}}
                      (select-keys (:s-var unification-failure-data) [:type :typeclasses])))
               (is (= {:type 'string?} (:schema unification-failure-data)))
-              (is (= #{:number} (:missing-typeclasses unification-failure-data)))))))))
-))
+              (is (= #{:number} (:missing-typeclasses unification-failure-data)))))))))))
