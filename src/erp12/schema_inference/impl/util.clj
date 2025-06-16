@@ -356,6 +356,7 @@
   (cond
     (= s-var schema) {}
 
+    ;; Occurs check
     (contains? (free-type-vars schema) sym)
     {:mgu-failure :occurs-check
      :schema-1    s-var
@@ -370,6 +371,7 @@
        :schema            schema
        :missing-typeclasses violated-typeclasses})
 
+    ;; Default: bind s-var to concrete schema
     :else {sym schema}))
 
 (defmethod mgu [:s-var :_]

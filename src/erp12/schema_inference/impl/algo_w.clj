@@ -7,7 +7,15 @@
 
 (defmulti algo-w
   "Core of the schema inference algorithm (Algorithm W).
-  Dispatches on the :op of the AST node."
+   Dispatches on the :op of the AST node.
+
+   Parameters:
+     - an AST node with an :op key
+     - an environment, giving the typing context
+   
+   Returns: a map containing keys:
+     - ::subs - a substitution — a mapping from type variables to types, which captures all the unifications made during inference.
+     - ::schema - the schema/type of the expression, possibly containing type variables (which may be generalized later)."
   (fn [{:keys [op]} & _] op)) ; Dispatch only on op and env
 
 (defn- algo-w-failure?
