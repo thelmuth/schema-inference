@@ -94,7 +94,7 @@
       (is (= schema {:type :=>
                      :input {:type :cat
                              :children []}
-                     :output {:type 'int?}}))
+                     :output {:type 'int? :typeclasses #{:number}}}))
       (is (= (count subs) 2)))
     (let [{::a/keys [subs schema failure]}
           (algo-w (ana/analyze '(fn [] (inc 1.5))) test-env)]
@@ -102,7 +102,7 @@
       (is (= schema {:type :=>
                      :input {:type :cat
                              :children []}
-                     :output {:type 'double?}}))
+                     :output {:type 'double? :typeclasses #{:number}}}))
       (is (= (count subs) 2)))
     (let [{::a/keys [subs schema failure]}
           (algo-w (ana/analyze '(fn [] (inc "hi there"))) test-env)]
@@ -126,8 +126,8 @@
       (is (nil? failure))
       (is (= schema {:type   :=>
                      :input  {:type     :cat
-                              :children [{:type 'int?}]}
-                     :output {:type 'int?}}))
+                              :children [{:type 'int? :typeclasses #{:number}}]}
+                     :output {:type 'int? :typeclasses #{:number}}}))
       (is (= (count subs) 8))))
   (testing "add test"
     (let [{::a/keys [subs schema failure]}
@@ -174,8 +174,8 @@
       (is (nil? failure))
       (is (= schema {:type :=>
                      :input {:type :cat
-                             :children [{:type 'double?}]}
-                     :output {:type 'double?}}))
+                             :children [{:type 'double? :typeclasses #{:number}}]}
+                     :output {:type 'double? :typeclasses #{:number}}}))
       (is (= (count subs) 3))))
   (testing "nullary"
     (let [{::a/keys [subs schema failure]}
@@ -232,7 +232,7 @@
   (let [{::a/keys [subs schema failure]}
         (algo-w (ana/analyze `(map inc [0])) test-env)]
     (is (nil? failure))
-    (is (= schema {:type :vector :child {:type 'int?}}))
+    (is (= {:type :vector :child {:type 'int? :typeclasses #{:number}}} schema))
     (is (= 6 (count subs)))))
 
 (deftest algo-w-let-test
@@ -242,7 +242,7 @@
                                 (f# a#)))
                 test-env)]
     (is (nil? failure))
-    (is (= schema {:type 'int?}))
+    (is (= {:type 'int? :typeclasses #{:number}} schema))
     (is (= (count subs) 2))))
 
 (deftest algo-w-letfn-test
@@ -252,7 +252,7 @@
                                 (g# 0)))
                 test-env)]
     (is (nil? failure))
-    (is (= schema {:type 'int?}))
+    (is (= {:type 'int? :typeclasses #{:number}} schema))
     (is (= (count subs) 14)))
   ; @todo (testing "ahead-of-definition")
   )
@@ -302,7 +302,7 @@
 (deftest algo-w-static-call-test
   (let [{::a/keys [subs schema failure]} (algo-w (ana/analyze '(inc 1)) test-env)]
     (is (nil? failure))
-    (is (= schema {:type 'int?}))
+    (is (= {:type 'int? :typeclasses #{:number}} schema))
     (is (= (count subs) 2))))
 
 (deftest algo-w-static-field-test
@@ -343,7 +343,7 @@
         (let [ast {:op :APP :fn {:op :VAR :sym 'id-num} :args [{:op :LIT :type :int :val 1}]}
               env {'id-num id-num-schema}
               result-schema (schema-inf/infer-schema ast env)]
-          (is (= {:type 'int?} result-schema))))
+          (is (= {:type 'int? :typeclasses #{:number}} result-schema))))
 
       (testing "Application - Invalid: id-num with string"
         (let [ast {:op :APP :fn {:op :VAR :sym 'id-num} :args [{:op :LIT :type :string :val "foo"}]}
@@ -395,8 +395,10 @@
               app-bool-ast {:op :APP :fn {:op :VAR :sym 'f} :args [{:op :LIT :type :boolean :val true}]}
               app-vec-ast {:op :APP :fn {:op :VAR :sym 'f} :args [{:op :LIT :type :vector :val []}]}]
 
-          (is (= {:type 'int?} (schema-inf/infer-schema app-int-ast app-env)))
-          (is (= {:type 'double?} (schema-inf/infer-schema app-double-ast app-env)))
+          (is (= {:type 'int? :typeclasses #{:comparable :number}} 
+                 (schema-inf/infer-schema app-int-ast app-env)))
+          (is (= {:type 'double? :typeclasses #{:comparable :number}} 
+                 (schema-inf/infer-schema app-double-ast app-env)))
 
           ;; This should throw exception because booleans aren't in :number typeclass
           (is (thrown-with-msg?
