@@ -26,19 +26,11 @@
              (x->y {:type :s-var :sym 'x})))
       (is (= {:type :s-var :sym 'z}
              (x->y {:type :s-var :sym 'z})))
-
-      ;; Broken
       (is (= {:type :s-var :sym 'y :typeclasses #{:number}}
              (x->y {:type :s-var :sym 'x :typeclasses #{:number}})))
-
-      ;; Broken
-      ;; test merging of substitutions
       (is (= {:type :s-var :sym 'y :typeclasses #{:number :comparable}}
              (u/substitute {'x {:type :s-var :sym 'y :typeclasses #{:comparable}}}
                            {:type :s-var :sym 'x :typeclasses #{:number}})))
-
-      ;; Broken
-      ;; want a test or two with typeclasses in the substitution map
       (is (= {:type :s-var :sym 'y :typeclasses #{:number}}
              (u/substitute {'x {:type :s-var :sym 'y}}
                            {:type :s-var :sym 'x :typeclasses #{:number}})))

@@ -9,7 +9,7 @@
   It verifies that the schema has only a :type key, the type is an identifier
   (like a keyword or symbol) or a class, and is not a schema variable (:s-var)."
   [{:keys [type] :as schema}]
-  (and (= (count schema) 1)
+  (and (= (count (dissoc schema :typeclasses)) 1)
        (or (ident? type) (class? type))
        (not= type :s-var)))
 
@@ -79,6 +79,11 @@
   [{:keys [s-vars body]}]
   (set/difference (free-type-vars body)
                   (set (map :sym s-vars))))
+
+(defmethod free-type-vars :default
+  [schema]
+  (throw (ex-info "free-type-vars: unhandled schema type" {:schema schema})))
+
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -154,9 +159,18 @@
 (defmethod substitute :s-var
   ;; "For a schema variable (:s-var), if its symbol is found as a key in the
   ;; substitution map (`subs`), it is replaced with the corresponding schema.
-  ;; Otherwise, the schema variable is returned unchanged."
+  ;; Otherwise, the schema variable is returned unchanged.
+  ;; Merges typeclass constraints if present in the replacement or original schema."
   [subs s-var]
-  (get subs (:sym s-var) s-var))
+  (if-let [replacement (get subs (:sym s-var))]
+    (let [orig-tcs (:typeclasses s-var)
+          repl-tcs (:typeclasses replacement)
+          merged-tcs (set/union orig-tcs repl-tcs)]
+      (cond-> replacement
+        ;; If merged-tcs is empty, don't assoc it
+        (seq merged-tcs) (assoc :typeclasses merged-tcs)))
+    ;; If replacement is nil, just return s-var without changes
+    s-var))
 
 (defn- substitute-ctor1
   [subs {:keys [child] :as schema}]
