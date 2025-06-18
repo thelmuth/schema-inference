@@ -482,7 +482,8 @@
 (defmethod mgu :default
   ;; "Default unification rule: two schemas can unify if and only if they are identical."
   [a b]
-  (if (= a b)
+  (if (= (dissoc a :typeclasses)
+         (dissoc b :typeclasses))
     {}
     {:schema-1    a
      :schema-2    b

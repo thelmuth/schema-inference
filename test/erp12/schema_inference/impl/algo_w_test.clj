@@ -159,7 +159,7 @@
       (is (= schema {:type :=>
                      :input {:type :cat
                              :children []}
-                     :output {:type 'int?}}))
+                     :output {:type 'int? :typeclasses #{:number}}}))
       (is (= (count subs) 2)))
     (let [{::a/keys [subs schema failure]}
           (algo-w (ana/analyze '(fn [] (+ 1.5 2.73))) test-env)]
@@ -167,7 +167,7 @@
       (is (= schema {:type :=>
                      :input {:type :cat
                              :children []}
-                     :output {:type 'double?}}))
+                     :output {:type 'double? :typeclasses #{:number}}}))
       (is (= (count subs) 2)))
     (let [{::a/keys [subs schema failure]}
           (algo-w (ana/analyze '(fn [x] (+ 1.5 x))) test-env)]
