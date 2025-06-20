@@ -13,16 +13,19 @@
        (or (ident? type) (class? type))
        (not= type :s-var)))
 
+(defn- free-type-vars-dispatch
+  [s]
+  (cond (ground? s) :ground
+        (map? (:type s)) :type-constructor
+        :else (:type s)))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defmulti free-type-vars
   "Returns a set of free type variable symbols (e.g., 'T, 'U) within a given schema.
   Dispatch is based on the schema's :type. If the schema is a ground type,
   it dispatches on :ground."
-  (fn [s]
-    (cond (ground? s) :ground
-          (map? (:type s)) :type-constructor
-          :else (:type s))))
+  free-type-vars-dispatch)
 
 (defmethod free-type-vars :ground
   ;; "Ground types have no free type variables."
@@ -108,9 +111,12 @@
 (defmulti get-free-s-vars-defs
   "Returns a set of free type variable definitions (maps like {:sym 'a :typeclasses [...]})
   within a given schema. Dispatch is based on the schema's :type."
-  (fn [s] (if (ground? s) :ground (:type s))))
+  free-type-vars-dispatch)
 
 (defmethod get-free-s-vars-defs :ground [_] #{})
+
+(defmethod get-free-s-vars-defs :type-constructor
+  [{:keys [type]}] (get-free-s-vars-defs type))
 
 (defn- get-free-s-vars-defs-ctor1 [{:keys [child]}] (get-free-s-vars-defs child))
 
