@@ -6,6 +6,7 @@
    :countable  #{:vector :map-of :set 'string?}
    :callable   #{:=> :map-of :set}
    :indexable  #{:vector 'string?}
+   :intable    #{'double? 'char?}
    }
   
   ;;;;;;; Maybe add in future?
