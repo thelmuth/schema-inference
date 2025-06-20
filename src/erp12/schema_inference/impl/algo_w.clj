@@ -45,7 +45,8 @@
   {::subs   {}
    ::schema (case type
               :class {:type Class}
-              (m/ast (mp/provide [val])))})
+              (m/ast (mp/provide [val]
+                                 {::mp/map-of-threshold 0})))})
 
 (defmethod algo-w :VAR
   [{:keys [sym]} env]

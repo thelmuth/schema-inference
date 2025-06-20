@@ -351,6 +351,11 @@
          (= (:type b) :maybe))
     [:maybe :maybe]
 
+    (and (map? (:type a))
+         (map? (:type b))) [:type-constructor :type-constructor]
+    (map? (:type a)) [:type-constructor :_]
+    (map? (:type b)) [:_ :type-constructor]
+    
     (= (:type a) :s-var) [:s-var :_]
     (= (:type b) :s-var) [:_ :s-var]
     :else [(:type a) (:type b)]))
@@ -413,6 +418,15 @@
 
     ;; Default: bind s-var to concrete schema
     :else {sym schema}))
+
+(defmethod mgu [:type-constructor :type-constructor]
+  [a b] (bind-var (:type a) (:type b)))
+
+(defmethod mgu [:type-constructor :_]
+  [c b] (bind-var (:type c) b))
+
+(defmethod mgu [:_ :type-constructor]
+  [a c] (bind-var (:type c) a))
 
 (defmethod mgu [:s-var :_]
   ;; "Unifies a schema variable `a` with schema `b`."

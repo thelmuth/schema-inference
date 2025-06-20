@@ -2,7 +2,9 @@
   (:require [clojure.test :refer [deftest is testing]]
             [clojure.tools.analyzer.jvm :as ana]
             [erp12.schema-inference.impl.algo_w :refer [algo-w] :as a]
-            [erp12.schema-inference.api :as schema-inf]) ; For api/infer-schema tests
+            [erp12.schema-inference.api :as schema-inf] ; For api/infer-schema tests
+            [malli.core :as m]
+            [malli.provider :as mp])
   (:import (java.io PrintStream)))
 
 ;; Keep some empty vars to be used arbitrarily in test ASTs.
@@ -83,12 +85,44 @@
          {::a/subs   {}
           ::a/schema {:type 'int?}})))
 
-(let [{::a/keys [subs schema failure]}
-      (algo-w (ana/analyze '(fn [] (count [1 2]))) test-env)]
-  {:subs subs
-   :scheme schema
-   :failure failure}
-  )
+(deftest algo-w-type-constructor-tests
+  (is (let [{::a/keys [subs schema failure]}
+            (algo-w (ana/analyze '(fn [] (count [1 2]))) test-env)]
+        {:subs subs
+         :scheme schema
+         :failure failure}))
+
+  (is (let [{::a/keys [subs schema failure]}
+            (algo-w (ana/analyze '(fn [] (count #{1 2}))) test-env)]
+        {:subs subs
+         :scheme schema
+         :failure failure}))
+
+  (is (let [{::a/keys [subs schema failure]}
+            (algo-w (ana/analyze '(fn [] (count "hi there"))) test-env)]
+        {:subs subs
+         :scheme schema
+         :failure failure}))
+
+  (is (let [{::a/keys [subs schema failure]}
+            (algo-w (ana/analyze '(fn [] (count {"hi" 5 "go" 10}))) test-env)]
+        {:subs subs
+         :scheme schema
+         :failure failure}))
+
+  (is (let [{::a/keys [subs schema failure]}
+            (algo-w (ana/analyze '(fn [] (count {1 10 2 20 3 30 4 40}))) test-env)]
+        {:subs subs
+         :scheme schema
+         :failure failure}))
+  
+  (let [{::a/keys [failure]}
+        (algo-w (ana/analyze '(fn [] (count \g))) test-env)]
+    (is (= {:unification-failure {:mgu-failure         :typeclass-mismatch
+                                  :schema              {:type 'char?}
+                                  :missing-typeclasses #{:countable}
+                                  :s-var               {:type :s-var :typeclasses #{:countable}}}}
+           (update-in failure [:unification-failure :s-var] dissoc :sym)))))
 
 (deftest algo-w-fn-test
   (testing "inc test"
