@@ -22,7 +22,15 @@
                   :body {:type :=>
                          :input {:type :cat
                                  :children [{:type :s-var, :sym 'a} {:type :s-var, :sym 'a}]}
-                         :output {:type :s-var, :sym 'a}}}]
+                         :output {:type :s-var, :sym 'a}}}
+        count-type {:type   :scheme
+                    :s-vars [{:sym 'c :typeclasses #{:countable}}]
+                    :body   {:type :=>
+                             :input {:type :cat
+                                     :children [{:type  {:type :s-var :sym 'c}
+                                                      ;:child {:type :s-var :sym 'a}
+                                                 }]},
+                             :output {:type 'int?}}}]
     {'clojure.lang.Numbers/inc
      inc-type
 
@@ -34,6 +42,12 @@
 
      'clojure.lang.Numbers/add
      add-type
+
+     'clojure.core/count
+     count-type
+
+     'clojure.lang.RT/count
+     count-type
 
      'clojure.core/if
      {:type   :scheme
@@ -68,6 +82,13 @@
   (is (= (algo-w (ana/analyze '(do (println "!") 1)) test-env)
          {::a/subs   {}
           ::a/schema {:type 'int?}})))
+
+(let [{::a/keys [subs schema failure]}
+      (algo-w (ana/analyze '(fn [] (count [1 2]))) test-env)]
+  {:subs subs
+   :scheme schema
+   :failure failure}
+  )
 
 (deftest algo-w-fn-test
   (testing "inc test"

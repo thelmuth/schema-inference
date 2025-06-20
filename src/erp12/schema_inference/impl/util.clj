@@ -19,11 +19,18 @@
   "Returns a set of free type variable symbols (e.g., 'T, 'U) within a given schema.
   Dispatch is based on the schema's :type. If the schema is a ground type,
   it dispatches on :ground."
-  (fn [s] (if (ground? s) :ground (:type s))))
+  (fn [s]
+    (cond (ground? s) :ground
+          (map? (:type s)) :type-constructor
+          :else (:type s))))
 
 (defmethod free-type-vars :ground
   ;; "Ground types have no free type variables."
   [_] #{})
+
+(defmethod free-type-vars :type-constructor
+  ;; "If a type constructor, recursively call on the :type"
+  [{:keys [type]}] (free-type-vars type))
 
 (defn- free-type-vars-ctor1 [{:keys [child]}] (free-type-vars child))
 
@@ -139,7 +146,10 @@
   with their corresponding schemas from a substitution map (`subs`).
   The dispatch is based on the schema's :type. If the schema is a ground type,
   it dispatches on :ground."
-  (fn [_ x] (if (ground? x) :ground (:type x))))
+  (fn [_ x] 
+    (cond (ground? x) :ground 
+          (map? (:type x)) :type-constructor
+          :else (:type x))))
 
 (defmethod substitute :ground
   ;; "For ground types, attempts to map the :type to a canonical ground type
@@ -148,6 +158,12 @@
   ;; variables occurs as ground types do not contain them."
   [_ schema]
   (update schema :type #(get g/canonical-ground % %)))
+
+(defmethod substitute :type-constructor
+  [subs {:keys [type] :as schema}]
+  (assoc schema
+         :type
+         (substitute subs type)))
 
 (defmethod substitute :=>
   ;; "Substitutes type variables in the input and output schemas of a function schema (:=>)."

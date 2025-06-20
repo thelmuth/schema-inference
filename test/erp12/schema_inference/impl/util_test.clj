@@ -105,9 +105,12 @@
                 :body   {:type :s-var :sym 'x}}
                (x->y {:type   :scheme
                       :s-vars [{:sym 'x :typeclasses #{:number}}]
-                      :body   {:type :s-var :sym 'x}})))))))
+                      :body   {:type :s-var :sym 'x}}))))
 
-(substitute-test)
+      (testing "type constructors"
+        (is (= {:type {:type :s-var :sym 'x :typeclasses #{:countable}}}
+               (u/substitute {'c {:type :s-var :sym 'x}}
+                             {:type {:type :s-var :sym 'c :typeclasses #{:countable}}})))))))
 
 (deftest substitute-env-test
   (is {'a {:type   :scheme
@@ -170,7 +173,9 @@
                               :body   {:type   :=>
                                        :input  {:type     :cat
                                                 :children [{:type :s-var :sym 'x}]}
-                                       :output {:type :s-var :sym 'y}}})))))
+                                       :output {:type :s-var :sym 'y}}}))))
+  (testing "type constructors"
+    (is (= #{'c} (u/free-type-vars {:type {:type :s-var :sym 'c :typeclasses #{:countable}}})))))
 
 (deftest free-type-vars-env-test
   (is (= (u/free-type-vars-env {'a {:type   :scheme
