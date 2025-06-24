@@ -86,36 +86,71 @@
           ::a/schema {:type 'int?}})))
 
 (deftest algo-w-type-constructor-tests
-  (is (let [{::a/keys [subs schema failure]}
-            (algo-w (ana/analyze '(fn [] (count [1 2]))) test-env)]
-        {:subs subs
-         :scheme schema
-         :failure failure}))
+  (let [{::a/keys [subs schema failure]}
+        (algo-w (ana/analyze '(fn [] (count [1 2]))) test-env)
+        collection-type (-> subs vals)]
+    (is (nil? failure))
+    (is (= schema {:type :=>
+                   :input {:type :cat
+                           :children []}
+                   :output {:type 'int?}}))
+    (is (= (count subs) 2))
+    (is (= collection-type [{:type 'int?}
+                            {:child {:type 'int?} :type :vector}])))
 
-  (is (let [{::a/keys [subs schema failure]}
-            (algo-w (ana/analyze '(fn [] (count #{1 2}))) test-env)]
-        {:subs subs
-         :scheme schema
-         :failure failure}))
 
-  (is (let [{::a/keys [subs schema failure]}
-            (algo-w (ana/analyze '(fn [] (count "hi there"))) test-env)]
-        {:subs subs
-         :scheme schema
-         :failure failure}))
+  (let [{::a/keys [subs schema failure]}
+        (algo-w (ana/analyze '(fn [] (count #{1 2}))) test-env)
+        collection-type (-> subs vals)]
+    (is (nil? failure))
+    (is (= schema {:type :=>
+                   :input {:type :cat
+                           :children []}
+                   :output {:type 'int?}}))
+    (is (= (count subs) 2))
+    (is (= collection-type [{:type 'int?}
+                            {:child {:type 'int?} :type :set}])))
 
-  (is (let [{::a/keys [subs schema failure]}
-            (algo-w (ana/analyze '(fn [] (count {"hi" 5 "go" 10}))) test-env)]
-        {:subs subs
-         :scheme schema
-         :failure failure}))
+  (let [{::a/keys [subs schema failure]}
+        (algo-w (ana/analyze '(fn [] (count "hi there"))) test-env)
+        collection-type (-> subs vals)]
+    (is (nil? failure))
+    (is (= schema {:type :=>
+                   :input {:type :cat
+                           :children []}
+                   :output {:type 'int?}}))
+    (is (= (count subs) 2))
+    (is (= collection-type [{:type 'int?}
+                            {:type 'string?}])))
 
-  (is (let [{::a/keys [subs schema failure]}
-            (algo-w (ana/analyze '(fn [] (count {1 10 2 20 3 30 4 40}))) test-env)]
-        {:subs subs
-         :scheme schema
-         :failure failure}))
-  
+  (let [{::a/keys [subs schema failure]}
+        (algo-w (ana/analyze '(fn [] (count {"hi" 5 "go" 10}))) test-env)
+        collection-type (-> subs vals)]
+    (is (nil? failure))
+    (is (= schema {:type :=>
+                   :input {:type :cat
+                           :children []}
+                   :output {:type 'int?}}))
+    (is (= (count subs) 2))
+    (is (= collection-type [{:type 'int?}
+                            {:type :map-of
+                             :key {:type 'string?}
+                             :value {:type 'int?}}])))
+
+  (let [{::a/keys [subs schema failure]}
+            (algo-w (ana/analyze '(fn [] (count {1 10 2 20 3 30 4 40}))) test-env)
+            collection-type (-> subs vals)]
+            (is (nil? failure))
+            (is (= schema {:type :=>
+                           :input {:type :cat
+                                   :children []}
+                           :output {:type 'int?}}))
+            (is (= (count subs) 2))
+            (is (= collection-type [{:type 'int?}
+                                    {:type :map-of
+                                     :key {:type 'int?}
+                                     :value {:type 'int?}}])))
+
   (let [{::a/keys [failure]}
         (algo-w (ana/analyze '(fn [] (count \g))) test-env)]
     (is (= {:unification-failure {:mgu-failure         :typeclass-mismatch
