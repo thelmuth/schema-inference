@@ -349,18 +349,20 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Most General Unifier
 
-(defn- mgu-dispatch
+(defn- get-effective-mgu-schema
+  "Returns the 'effective' schema for MGU operations by unwrapping it if its :type is a map."
+  [schema]
+  (if (map? (:type schema))
+    (:type schema)
+    schema))
+
+(defn- mgu*-dispatch
   "Dispatch function for mgu. Dispatch is only on the types of the first two schemas a and b."
   [a b]
   (cond
     (and (= (:type a) :maybe)
          (= (:type b) :maybe))
     [:maybe :maybe]
-
-    (and (map? (:type a))
-         (map? (:type b))) [:type-constructor :type-constructor]
-    (map? (:type a)) [:type-constructor :_]
-    (map? (:type b)) [:_ :type-constructor]
     
     (= (:type a) :s-var) [:s-var :_]
     (= (:type b) :s-var) [:_ :s-var]
@@ -372,15 +374,22 @@
   [x]
   (and (map? x) (some? (:mgu-failure x))))
 
-(defmulti mgu
-  "Computes the Most General Unifier (MGU) for two schemas, `a` and `b`,
-  considering typeclass constraints (using global tc/typeclasses).
+(defmulti mgu*
+  "Internal MGU implementation. Computes the Most General Unifier (MGU) for two 
+   *effective* schemas, `a` and `b`, considering typeclass constraints.
   The MGU is a substitution map that, when applied to both `a` and `b`,
   makes them identical. If no such substitution exists, it returns a map
   indicating an MGU failure (see `mgu-failure?`).
-  Dispatch is based on a vector of the types of both input schemas,
-  handling schema variables (:s-var) specially."
-  mgu-dispatch)
+  Dispatch is based on a vector of the types of both input *effective* schemas."
+  mgu*-dispatch)
+
+(defn mgu
+  "Public MGU function. Computes the Most General Unifier for two schemas `a` and `b`.
+  Handles potential schema wrapping (where :type of a schema is another schema map)
+  before delegating to the internal mgu* implementation."
+  [a b]
+  (mgu* (get-effective-mgu-schema a)
+        (get-effective-mgu-schema b)))
 
 ;; Helper to call mgu and then a function on its non-failure result.
 (defn- with-mgu
@@ -425,44 +434,35 @@
     ;; Default: bind s-var to concrete schema
     :else {sym schema}))
 
-(defmethod mgu [:type-constructor :type-constructor]
-  [a b] (bind-var (:type a) (:type b)))
-
-(defmethod mgu [:type-constructor :_]
-  [c b] (bind-var (:type c) b))
-
-(defmethod mgu [:_ :type-constructor]
-  [a c] (bind-var (:type c) a))
-
-(defmethod mgu [:s-var :_]
+(defmethod mgu* [:s-var :_]
   ;; "Unifies a schema variable `a` with schema `b`."
   [a b] (bind-var a b))
 
-(defmethod mgu [:_ :s-var]
+(defmethod mgu* [:_ :s-var]
   ;; "Unifies schema `a` with a schema variable `b`."
   [a b] (bind-var b a))
 
-(defn- mgu-schema-ctor1
+(defn- mgu*-schema-ctor1
   [{a-type :type a-child :child :as a} {b-type :type b-child :child :as b}]
   (if (not= a-type b-type)
     {:mgu-failure :mismatched-schema-ctor
      :schema-1    a
      :schema-2    b}
-    (mgu a-child b-child)))
+    (mgu* a-child b-child)))
 
-(defmethod mgu [:vector :vector]
-  [a b] (mgu-schema-ctor1 a b))
+(defmethod mgu* [:vector :vector]
+  [a b] (mgu*-schema-ctor1 a b))
 
-(defmethod mgu [:set :set]
-  [a b] (mgu-schema-ctor1 a b))
+(defmethod mgu* [:set :set]
+  [a b] (mgu*-schema-ctor1 a b))
 
-(defmethod mgu [:sequential :sequential]
-  [a b] (mgu-schema-ctor1 a b))
+(defmethod mgu* [:sequential :sequential]
+  [a b] (mgu*-schema-ctor1 a b))
 
-(defmethod mgu [:maybe :maybe]
-  [a b] (mgu-schema-ctor1 a b))
+(defmethod mgu* [:maybe :maybe]
+  [a b] (mgu*-schema-ctor1 a b))
 
-(defn- mgu-schema-ctorN
+(defn- mgu*-schema-ctorN
   [{a-type :type a-children :children :as a}
    {b-type :type b-children :children :as b}]
   (cond
@@ -486,13 +486,13 @@
                                #(compose-substitutions % subs))))
                  {}))))
 
-(defmethod mgu [:tuple :tuple]
-  [a b] (mgu-schema-ctorN a b))
+(defmethod mgu* [:tuple :tuple]
+  [a b] (mgu*-schema-ctorN a b))
 
-(defmethod mgu [:cat :cat]
-  [a b] (mgu-schema-ctorN a b))
+(defmethod mgu* [:cat :cat]
+  [a b] (mgu*-schema-ctorN a b))
 
-(defmethod mgu [:map-of :map-of]
+(defmethod mgu* [:map-of :map-of]
   [{a-key :key a-value :value} {b-key :key b-value :value}]
   (with-mgu a-key b-key
             (fn [key-subs]
@@ -501,7 +501,7 @@
                         (fn [value-subs]
                           (compose-substitutions value-subs key-subs))))))
 
-(defmethod mgu [:=> :=>]
+(defmethod mgu* [:=> :=>]
   [{a-input :input a-output :output :as a} {b-input :input b-output :output :as b}]
   ;; @todo Support other function args (named, variatic) aside from :cat
   (if (or (not= (:type a-input) :cat)
@@ -515,7 +515,7 @@
                           (substitute subs b-output)
                           #(compose-substitutions % subs))))))
 
-(defmethod mgu :default
+(defmethod mgu* :default
   ;; "Default unification rule: two schemas can unify if and only if they are identical."
   [a b]
   (if (= (dissoc a :typeclasses)
