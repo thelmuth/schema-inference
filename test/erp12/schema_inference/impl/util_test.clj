@@ -573,7 +573,8 @@
            (u/get-free-s-vars-defs {:type :s-var :sym 'a :typeclasses #{:number}}))))
   (testing "nested schema with s-vars with typeclasses"
     (is (= #{{:sym 'a :typeclasses #{:number}} {:sym 'b :typeclasses #{:countable}}}
-           (u/get-free-s-vars-defs {:type :vector :child {:type :tuple :children [{:type :s-var :sym 'a :typeclasses #{:number}} {:type :s-var :sym 'b :typeclasses #{:countable}}]}}))))
+           (u/get-free-s-vars-defs {:type :vector :child {:type :tuple :children [{:type :s-var :sym 'a :typeclasses #{:number}} 
+                                                                                  {:type :s-var :sym 'b :typeclasses #{:countable}}]}}))))
   (testing "function schema with s-vars with typeclasses in input and output"
     (is (= #{{:sym 'in :typeclasses #{:indexable}} {:sym 'out :typeclasses #{:callable}}}
            (u/get-free-s-vars-defs {:type   :=>
@@ -640,3 +641,106 @@
     ;; If an unknown typeclass is required, it cannot be satisfied.
     (is (not (u/satisfies-all-typeclasses? {:type 'int?} #{:unknown-typeclass})))
     (is (not (u/satisfies-all-typeclasses? {:type :s-var :sym 'a :typeclasses #{:number}} #{:unknown-typeclass})))))
+
+(deftest overloaded-schema-tests
+  (let [first-overload {:type :overloaded
+                        :alternatives
+                        [{:type :scheme
+                          :s-vars [{:sym 'a}]
+                          :body {:type :=>
+                                 :input {:type :cat
+                                         :children [{:type :vector
+                                                     :child {:type :s-var :sym 'a}}]}
+                                 :output {:type :s-var :sym 'a}}}
+                         {:type :=>
+                          :input {:type :cat :children [{:type 'string?}]}
+                          :output {:type 'char?}}]} 
+        concrete-alt-2-sig {:type :=>
+                            :input {:type :cat :children [{:type 'string?}]}
+                            :output {:type 'char?}}]
+
+    (testing "free-type-vars for :overloaded"
+      (is (= #{} (u/free-type-vars first-overload))) ; 'a and 'b are bound in their schemes
+      (let [overload-with-free-var
+            (update-in first-overload [:alternatives 0 :body :input :children 0 :child] assoc :sym 'freeA)]
+        (is (= #{'freeA} (u/free-type-vars overload-with-free-var)))))
+
+    (testing "get-free-s-vars-defs for :overloaded"
+      (is (= #{} (u/get-free-s-vars-defs first-overload)))
+      (let [overload-with-free-s-var-def
+            (update-in first-overload [:alternatives 0 :body :input :children 0 :child] merge {:sym 'freeA :typeclasses #{:tcA}})]
+        (is (= #{{:sym 'freeA :typeclasses #{:tcA}}} (u/get-free-s-vars-defs overload-with-free-s-var-def)))))
+
+    (testing "substitute for :overloaded (fails because no free type variables here)"
+      (let [subs {'a {:type 'int?}}
+            substituted (u/substitute subs first-overload)]
+        (is (= first-overload substituted)))
+      
+      (let [free-var-overload {:type :overloaded
+                               :alternatives [{:type :=>
+                                               :input {:type :cat :children [{:type :s-var :sym 'x}]}
+                                               :output {:type :s-var :sym 'x}}
+                                              concrete-alt-2-sig]}
+            substituted-free (u/substitute {'x {:type 'boolean?}} free-var-overload)
+            alt1-substituted (first (:alternatives substituted-free))]
+        (is (= {:type 'boolean?} (get-in alt1-substituted [:input :children 0])))
+        (is (= {:type 'boolean?} (:output alt1-substituted)))))
+
+    (testing "mgu with :overloaded"
+      (testing "Unifying overloaded with concrete function type - matches first alternative (polymorphic)"
+        (let [target-fn {:type :=>
+                         :input {:type :cat :children [{:type :vector :child {:type 'int?}}]}
+                         :output {:type 'int?}}
+              result (u/mgu first-overload target-fn)]
+          (is (map? result))
+          (is (not (u/mgu-failure? result)))
+          (is (= 1 (count result)))
+          (let [sub-val (first (vals result))]
+            (is (= {:type 'int?} sub-val)))))
+
+      (testing "Unifying overloaded with concrete function type - matches second alternative (concrete)"
+        (let [target-fn {:type :=>
+                         :input {:type :cat :children [{:type 'string?}]}
+                         :output {:type 'char?}}
+              result (u/mgu first-overload target-fn)]
+          (is (= {} result)))) 
+
+      (testing "Unifying overloaded with incompatible type (non-function)"
+        (let [target {:type 'int?}
+              result (u/mgu first-overload target)]
+          (is (u/mgu-failure? result))
+          (is (= :no-matching-overload (:mgu-failure result)))))
+
+      (testing "Unifying schema with overloaded schema (symmetric)"
+        (let [target-fn {:type :=>
+                         :input {:type :cat :children [{:type 'string?}]}
+                         :output {:type 'char?}}
+              result (u/mgu target-fn first-overload)]
+          (is (= {} result))))
+
+      (testing "Unifying two overloaded schemas - currently unsupported"
+        (let [another-overload {:type :overloaded :alternatives [concrete-alt-2-sig]}
+              result (u/mgu first-overload another-overload)]
+          (is (not (u/mgu-failure? result)))
+          (is (= {} result))))
+
+      (testing "Unifying s-var with overloaded schema - should try to bind s-var to each alternative"
+        (let [s-var-schema {:type :s-var :sym 'x}
+              result (u/mgu s-var-schema first-overload)
+              expected-bound-schema (u/instantiate (first (:alternatives first-overload)))
+              replace-syms (fn [subs]
+                             (-> subs
+                                 (assoc-in ['x :input :children 0 :child :sym] 'unique1)
+                                 (assoc-in ['x :output :sym] 'unique1)))]
+          (is (= (replace-syms {(:sym s-var-schema) expected-bound-schema})
+                 (replace-syms result))))
+        
+        (let [s-var-fn-tc {:type :s-var :sym 'z :typeclasses #{:callable}} ; :callable is in erp12.schema-inference.impl.typeclasses for :=>
+              result-fn-tc (u/mgu s-var-fn-tc first-overload)
+              expected-bound-fn-schema (u/instantiate (first (:alternatives first-overload)))
+              replace-syms (fn [subs]
+                             (-> subs
+                                 (assoc-in ['z :input :children 0 :child :sym] 'unique1)
+                                 (assoc-in ['z :output :sym] 'unique1)))]
+          (is (= (replace-syms {(:sym s-var-fn-tc) expected-bound-fn-schema}) 
+                 (replace-syms result-fn-tc))))))))
