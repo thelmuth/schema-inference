@@ -567,27 +567,27 @@
       (is (= (:s-var result) s-var-child))
       (is (= (:schema result) concrete-child)))))
 
-(deftest get-free-s-vars-defs-test
+(deftest get-free-s-vars-test
   (testing "simple s-var with typeclass"
     (is (= #{{:sym 'a :typeclasses #{:number}}}
-           (u/get-free-s-vars-defs {:type :s-var :sym 'a :typeclasses #{:number}}))))
+           (u/get-free-s-vars {:type :s-var :sym 'a :typeclasses #{:number}}))))
   (testing "nested schema with s-vars with typeclasses"
     (is (= #{{:sym 'a :typeclasses #{:number}} {:sym 'b :typeclasses #{:countable}}}
-           (u/get-free-s-vars-defs {:type :vector :child {:type :tuple :children [{:type :s-var :sym 'a :typeclasses #{:number}} 
+           (u/get-free-s-vars {:type :vector :child {:type :tuple :children [{:type :s-var :sym 'a :typeclasses #{:number}} 
                                                                                   {:type :s-var :sym 'b :typeclasses #{:countable}}]}}))))
   (testing "function schema with s-vars with typeclasses in input and output"
     (is (= #{{:sym 'in :typeclasses #{:indexable}} {:sym 'out :typeclasses #{:callable}}}
-           (u/get-free-s-vars-defs {:type   :=>
+           (u/get-free-s-vars {:type   :=>
                                     :input  {:type     :cat
                                              :children [{:type :s-var :sym 'in :typeclasses #{:indexable}}]}
                                     :output {:type :s-var :sym 'out :typeclasses #{:callable}}}))))
   (testing "scheme with bound and free s-vars with typeclasses"
     (is (= #{{:sym 'c :typeclasses #{:comparable}}}
-           (u/get-free-s-vars-defs {:type   :scheme
+           (u/get-free-s-vars {:type   :scheme
                                     :s-vars [{:sym 'x :typeclasses #{:number}}]
                                     :body   {:type :s-var :sym 'c :typeclasses #{:comparable}}})))
     (is (= #{{:sym 'a :typeclasses #{:number}} {:sym 'c :typeclasses #{:comparable}}}
-           (u/get-free-s-vars-defs {:type   :scheme
+           (u/get-free-s-vars {:type   :scheme
                                     :s-vars [{:sym 'x :typeclasses #{:number}}]
                                     :body   {:type :tuple
                                              :children [{:type :s-var :sym 'a :typeclasses #{:number}}
@@ -595,16 +595,16 @@
                                                         {:type :s-var :sym 'c :typeclasses #{:comparable}}]}}))))
   (testing "schema with no free s-vars with typeclasses"
     (is (= #{{:sym 'a}}
-           (u/get-free-s-vars-defs {:type :s-var :sym 'a})))
+           (u/get-free-s-vars {:type :s-var :sym 'a})))
     (is (= #{}
-           (u/get-free-s-vars-defs {:type   :scheme
+           (u/get-free-s-vars {:type   :scheme
                                     :s-vars [{:sym 'x :typeclasses #{:number}}]
                                     :body   {:type :s-var :sym 'x :typeclasses #{:number}}})))
     (is (= #{}
-           (u/get-free-s-vars-defs {:type 'int?}))))
+           (u/get-free-s-vars {:type 'int?}))))
   (testing "schema with multiple distinct free s-vars with different typeclasses"
     (is (= #{{:sym 'a :typeclasses #{:number}} {:sym 'b :typeclasses #{:countable}} {:sym 'c :typeclasses #{:comparable}}}
-           (u/get-free-s-vars-defs {:type :tuple
+           (u/get-free-s-vars {:type :tuple
                                     :children [{:type :s-var :sym 'a :typeclasses #{:number}}
                                                {:type :s-var :sym 'b :typeclasses #{:countable}}
                                                {:type :s-var :sym 'c :typeclasses #{:comparable}}]})))))
@@ -665,11 +665,11 @@
             (update-in first-overload [:alternatives 0 :body :input :children 0 :child] assoc :sym 'freeA)]
         (is (= #{'freeA} (u/free-type-vars overload-with-free-var)))))
 
-    (testing "get-free-s-vars-defs for :overloaded"
-      (is (= #{} (u/get-free-s-vars-defs first-overload)))
+    (testing "get-free-s-vars for :overloaded"
+      (is (= #{} (u/get-free-s-vars first-overload)))
       (let [overload-with-free-s-var-def
             (update-in first-overload [:alternatives 0 :body :input :children 0 :child] merge {:sym 'freeA :typeclasses #{:tcA}})]
-        (is (= #{{:sym 'freeA :typeclasses #{:tcA}}} (u/get-free-s-vars-defs overload-with-free-s-var-def)))))
+        (is (= #{{:sym 'freeA :typeclasses #{:tcA}}} (u/get-free-s-vars overload-with-free-s-var-def)))))
 
     (testing "substitute for :overloaded (fails because no free type variables here)"
       (let [subs {'a {:type 'int?}}

@@ -15,62 +15,59 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defn- get-free-s-vars-defs-dispatch
+(defn- get-free-s-vars-dispatch
   [s]
   (cond (ground? s) :ground
         (map? (:type s)) :type-constructor
-        (= (:type s) :overloaded) :overloaded ;; TMH unnecessary
         :else (:type s)))
-
-;; TMH remove "defs"
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defmulti get-free-s-vars-defs
+(defmulti get-free-s-vars
   "Returns a set of free type variable definitions (maps like {:sym 'a :typeclasses [...]})
   within a given schema. Dispatch is based on the schema's :type."
-  get-free-s-vars-defs-dispatch)
+  get-free-s-vars-dispatch)
 
-(defmethod get-free-s-vars-defs :ground [_] #{})
+(defmethod get-free-s-vars :ground [_] #{})
 
-(defmethod get-free-s-vars-defs :type-constructor
-  [{:keys [type]}] (get-free-s-vars-defs type))
+(defmethod get-free-s-vars :type-constructor
+  [{:keys [type]}] (get-free-s-vars type))
 
-(defn- get-free-s-vars-defs-ctor1 [{:keys [child]}] (get-free-s-vars-defs child))
+(defn- get-free-s-vars-ctor1 [{:keys [child]}] (get-free-s-vars child))
 
-(defmethod get-free-s-vars-defs :vector [schema] (get-free-s-vars-defs-ctor1 schema))
-(defmethod get-free-s-vars-defs :set [schema] (get-free-s-vars-defs-ctor1 schema))
-(defmethod get-free-s-vars-defs :sequential [schema] (get-free-s-vars-defs-ctor1 schema))
-(defmethod get-free-s-vars-defs :maybe [schema] (get-free-s-vars-defs-ctor1 schema))
+(defmethod get-free-s-vars :vector [schema] (get-free-s-vars-ctor1 schema))
+(defmethod get-free-s-vars :set [schema] (get-free-s-vars-ctor1 schema))
+(defmethod get-free-s-vars :sequential [schema] (get-free-s-vars-ctor1 schema))
+(defmethod get-free-s-vars :maybe [schema] (get-free-s-vars-ctor1 schema))
 
-(defn- get-free-s-vars-defs-ctorN [{:keys [children]}]
-  (reduce #(set/union %1 (get-free-s-vars-defs %2)) #{} children))
+(defn- get-free-s-vars-ctorN [{:keys [children]}]
+  (reduce #(set/union %1 (get-free-s-vars %2)) #{} children))
 
-(defmethod get-free-s-vars-defs :tuple [schema] (get-free-s-vars-defs-ctorN schema))
-(defmethod get-free-s-vars-defs :cat [schema] (get-free-s-vars-defs-ctorN schema))
+(defmethod get-free-s-vars :tuple [schema] (get-free-s-vars-ctorN schema))
+(defmethod get-free-s-vars :cat [schema] (get-free-s-vars-ctorN schema))
 
-(defmethod get-free-s-vars-defs :map-of [{:keys [key value]}]
-  (set/union (get-free-s-vars-defs key) (get-free-s-vars-defs value)))
+(defmethod get-free-s-vars :map-of [{:keys [key value]}]
+  (set/union (get-free-s-vars key) (get-free-s-vars value)))
 
-(defmethod get-free-s-vars-defs :=> [{:keys [input output]}]
-  (set/union (get-free-s-vars-defs input) (get-free-s-vars-defs output)))
+(defmethod get-free-s-vars :=> [{:keys [input output]}]
+  (set/union (get-free-s-vars input) (get-free-s-vars output)))
 
-(defmethod get-free-s-vars-defs :s-var [s-var-def] #{(dissoc s-var-def :type)})
+(defmethod get-free-s-vars :s-var [s-var-def] #{(dissoc s-var-def :type)})
 
-(defmethod get-free-s-vars-defs :scheme [{:keys [s-vars body]}]
-  (set/difference (get-free-s-vars-defs body)
+(defmethod get-free-s-vars :scheme [{:keys [s-vars body]}]
+  (set/difference (get-free-s-vars body)
                   (set s-vars)))
 
-(defmethod get-free-s-vars-defs :overloaded
+(defmethod get-free-s-vars :overloaded
   [{:keys [alternatives]}]
-  (reduce #(set/union %1 (get-free-s-vars-defs %2)) #{} alternatives))
+  (reduce #(set/union %1 (get-free-s-vars %2)) #{} alternatives))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defn free-type-vars
   "Returns a set of free type variable symbols (e.g., 'T, 'U) within a given schema."
   [schema]
-  (set (map :sym (get-free-s-vars-defs schema))))
+  (set (map :sym (get-free-s-vars schema))))
 
 (defn free-type-vars-env
   "Computes the set of all free type variables present in an environment.
@@ -245,7 +242,7 @@
   [env schema]
   (let [schema-instance (instantiate schema) ; avoid calling instantiate on already instantiated schema
         env-free-vars-syms (free-type-vars-env env)
-        schema-free-s-vars-defs (get-free-s-vars-defs schema-instance)
+        schema-free-s-vars-defs (get-free-s-vars schema-instance)
         s-var-defs-to-generalize (filter #(not (contains? env-free-vars-syms (:sym %)))
                                          schema-free-s-vars-defs)
         sorted-s-var-defs (sort-by :sym (vec s-var-defs-to-generalize))]
