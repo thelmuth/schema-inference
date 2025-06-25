@@ -17,6 +17,7 @@
   [s]
   (cond (ground? s) :ground
         (map? (:type s)) :type-constructor
+        (= (:type s) :overloaded) :overloaded
         :else (:type s)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -55,6 +56,10 @@
 (defmethod get-free-s-vars-defs :scheme [{:keys [s-vars body]}]
   (set/difference (get-free-s-vars-defs body)
                   (set s-vars)))
+
+(defmethod get-free-s-vars-defs :overloaded
+  [{:keys [alternatives]}]
+  (reduce #(set/union %1 (get-free-s-vars-defs %2)) #{} alternatives))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -168,6 +173,11 @@
   (assoc scheme
     :body (substitute (apply dissoc subs (map :sym s-vars))
                       body)))
+
+(defmethod substitute :overloaded
+  ;; "Substitutes type variables in all alternatives of an :overloaded schema."
+  [subs {:keys [alternatives] :as schema}]
+  (assoc schema :alternatives (mapv #(substitute subs %) alternatives)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -295,6 +305,8 @@
     
     (= (:type a) :s-var) [:s-var :_]
     (= (:type b) :s-var) [:_ :s-var]
+     (= (:type a) :overloaded) [:overloaded :_]
+     (= (:type b) :overloaded) [:_ :overloaded]
     :else [(:type a) (:type b)]))
 
 (defn mgu-failure?
@@ -370,6 +382,34 @@
 (defmethod mgu* [:_ :s-var]
   ;; "Unifies schema `a` with a schema variable `b`."
   [a b] (bind-var b a))
+
+(defmethod mgu* [:overloaded :_]
+  ;; Unify an overloaded schema `a` with schema `b`.
+  ;; Try each alternative of `a` with `b`.
+  [a b]
+  (if (= (:type b) :overloaded)
+    ;; Both are overloaded, which is complex. For now, indicate failure or specific handling.
+    {:mgu-failure :overloaded-vs-overloaded
+     :schema-1    a
+     :schema-2    b
+     :message     "Unification between two :overloaded schemas is not yet supported directly."}
+    (loop [alternatives (:alternatives a)]
+      (if (empty? alternatives)
+        {:mgu-failure :no-matching-overload
+         :schema-1    a
+         :schema-2    b}
+        (let [alt (first alternatives)
+              ;; Instantiate if the alternative is a scheme
+              inst-alt (instantiate alt)
+              result (mgu inst-alt b)]
+          (if (mgu-failure? result)
+            (recur (rest alternatives))
+            result))))))
+
+(defmethod mgu* [:_ :overloaded]
+  ;; Symmetric to [:overloaded :_]
+  [a b]
+  (mgu* b a))
 
 (defn- mgu*-schema-ctor1
   [{a-type :type a-child :child :as a} {b-type :type b-child :child :as b}]

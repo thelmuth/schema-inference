@@ -61,37 +61,63 @@
   ;; Infers schema of the function and arguments, then unifies the function's
   ;; input schema with the argument schemas to determine the output schema."
   [{:keys [fn args]} env]
-  (let [s-var {:type :s-var :sym (gensym "s-")}
+  [{:keys [fn args]} env]
+  (let [s-var-out {:type :s-var :sym (gensym "s-out-")} ; Fresh var for the application's output
         {f-subs ::subs f-schema ::schema :as fn-result} (algo-w fn env)]
     (if (algo-w-failure? fn-result)
       fn-result
-      (let [args-ti (loop [remaining-args args
-                           env' (u/substitute-env f-subs env)
-                           args-ti []]
-                      (if (empty? remaining-args)
-                        args-ti
-                        (let [arg (first remaining-args)
-                              {a-subs ::subs :as arg-ti} (algo-w arg env')]
-                          (if (algo-w-failure? arg-ti)
-                            arg-ti
-                            (recur (rest remaining-args)
-                                   (u/substitute-env a-subs env')
-                                   (conj args-ti arg-ti))))))]
-        (if (algo-w-failure? args-ti)
-          args-ti
-          (let [subs (->> args-ti
-                          (map ::subs)
-                          reverse
-                          (reduce u/compose-substitutions {}))
-                subs' (u/mgu (u/substitute subs f-schema)
-                             {:type   :=>
-                              :input  {:type     :cat
-                                       :children (mapv ::schema args-ti)}
-                              :output s-var})]
-            (if (u/mgu-failure? subs')
-              {::failure {:unification-failure subs'}}
-              {::subs   (u/compose-substitutions subs' subs)
-               ::schema (u/substitute subs' s-var)})))))))
+      (let [;; Infer schemas for arguments
+            args-analysis-results (loop [remaining-args args
+                                         current-env (u/substitute-env f-subs env)
+                                         arg-results []
+                                         cumulative-arg-subs {}]
+                                    (if (empty? remaining-args)
+                                      {:results arg-results :subs cumulative-arg-subs}
+                                      (let [arg (first remaining-args)
+                                            {a-subs ::subs a-schema ::schema :as arg-res} (algo-w arg current-env)]
+                                        (if (algo-w-failure? arg-res)
+                                          arg-res ;; Propagate failure
+                                          (recur (rest remaining-args)
+                                                 (u/substitute-env a-subs current-env)
+                                                 (conj arg-results {::subs a-subs ::schema a-schema})
+                                                 (u/compose-substitutions a-subs cumulative-arg-subs))))))
+            all-arg-subs (:subs args-analysis-results)
+            arg-schemas (mapv ::schema (:results args-analysis-results))]
+
+        (if (algo-w-failure? args-analysis-results)
+          args-analysis-results ;; Propagate failure from argument inference
+
+          (let [current-subs (u/compose-substitutions all-arg-subs f-subs)
+                substituted-f-schema (u/substitute current-subs f-schema)
+                target-fn-schema {:type   :=>
+                                  :input  {:type     :cat
+                                           :children arg-schemas}
+                                  :output s-var-out}]
+
+            (if (= (:type substituted-f-schema) :overloaded)
+              ;; Handle overloaded function
+              (loop [alternatives (:alternatives substituted-f-schema)]
+                (if (empty? alternatives)
+                  {::failure {:type                 :no-matching-overload
+                              :function-schema      substituted-f-schema
+                              :argument-schemas   arg-schemas
+                              :target-schema      target-fn-schema}}
+                  (let [alt (first alternatives)
+                        inst-alt (u/instantiate alt) ; Instantiate scheme if alt is one
+                        mgu-result (u/mgu inst-alt target-fn-schema)]
+                    (if (u/mgu-failure? mgu-result)
+                      (recur (rest alternatives))
+                      ;; Successful unification with an alternative
+                      {::subs   (u/compose-substitutions mgu-result current-subs)
+                       ::schema (u/substitute mgu-result s-var-out)}))))
+              ;; Handle non-overloaded function (original logic)
+              (let [mgu-result (u/mgu substituted-f-schema target-fn-schema)]
+                (if (u/mgu-failure? mgu-result)
+                  {::failure {:unification-failure mgu-result
+                              :function-schema   substituted-f-schema
+                              :target-schema     target-fn-schema}}
+                  {::subs   (u/compose-substitutions mgu-result current-subs)
+                   ::schema (u/substitute mgu-result s-var-out)})))))))))
 
 (defmethod algo-w :ABS
   ;; "Handles abstractions (function definitions, e.g., `fn` forms).
