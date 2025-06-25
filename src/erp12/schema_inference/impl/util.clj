@@ -13,13 +13,13 @@
        (or (ident? type) (class? type))
        (not= type :s-var)))
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
 (defn- get-free-s-vars-defs-dispatch
   [s]
   (cond (ground? s) :ground
         (map? (:type s)) :type-constructor
         :else (:type s)))
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defmulti get-free-s-vars-defs
   "Returns a set of free type variable definitions (maps like {:sym 'a :typeclasses [...]})
