@@ -13,7 +13,7 @@
        (or (ident? type) (class? type))
        (not= type :s-var)))
 
-(defn- free-type-vars-dispatch
+(defn- get-free-s-vars-defs-dispatch
   [s]
   (cond (ground? s) :ground
         (map? (:type s)) :type-constructor
@@ -21,97 +21,10 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defmulti free-type-vars
-  "Returns a set of free type variable symbols (e.g., 'T, 'U) within a given schema.
-  Dispatch is based on the schema's :type. If the schema is a ground type,
-  it dispatches on :ground."
-  free-type-vars-dispatch)
-
-(defmethod free-type-vars :ground
-  ;; "Ground types have no free type variables."
-  [_] #{})
-
-(defmethod free-type-vars :type-constructor
-  ;; "If a type constructor, recursively call on the :type"
-  [{:keys [type]}] (free-type-vars type))
-
-(defn- free-type-vars-ctor1 [{:keys [child]}] (free-type-vars child))
-
-(defmethod free-type-vars :vector
-  ;; "Free variables in a :vector schema are those in its child schema."
-  [schema] (free-type-vars-ctor1 schema))
-
-(defmethod free-type-vars :set
-  ;; "Free variables in a :set schema are those in its child schema."
-  [schema] (free-type-vars-ctor1 schema))
-
-(defmethod free-type-vars :sequential
-  ;; "Free variables in a :sequential schema are those in its child schema."
-  [schema] (free-type-vars-ctor1 schema))
-
-(defmethod free-type-vars :maybe
-  ;; "Free variables in a :maybe schema are those in its child schema."
-  [schema] (free-type-vars-ctor1 schema))
-
-(defn- free-type-vars-ctorN
-  [{:keys [children]}]
-  (reduce #(set/union %1 (free-type-vars %2)) #{} children))
-
-(defmethod free-type-vars :tuple
-  ;; "Free variables in a :tuple schema are the union of free variables in its children schemas."
-  [schema] (free-type-vars-ctorN schema))
-
-(defmethod free-type-vars :cat
-  ;; "Free variables in a :cat schema (category, typically for function inputs)
-  ;are the union of free variables in its children schemas."
-  [schema] (free-type-vars-ctorN schema))
-
-(defmethod free-type-vars :map-of
-  ;; "Free variables in a :map-of schema are the union of free variables
-  ;in its key and value schemas."
-  [{:keys [key value]}]
-  (set/union (free-type-vars key) (free-type-vars value)))
-
-(defmethod free-type-vars :=>
-  ;; "Free variables in a function schema (:=>) are the union of free variables
-  ;; in its input and output schemas."
-  [{:keys [input output]}]
-  (set/union (free-type-vars input) (free-type-vars output)))
-
-(defmethod free-type-vars :s-var
-  ;; "The free variable in a schema variable (:s-var) is the symbol of the
-  ;; schema variable itself."
-  [{:keys [sym]}] #{sym})
-
-(defmethod free-type-vars :scheme
-  ;; "Free variables in a scheme (:scheme) are those in its body,
-  ;; excluding the scheme's own quantified variables (:s-vars)."
-  [{:keys [s-vars body]}]
-  (set/difference (free-type-vars body)
-                  (set (map :sym s-vars))))
-
-(defmethod free-type-vars :default
-  [schema]
-  (throw (ex-info "free-type-vars: unhandled schema type" {:schema schema})))
-
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-(defn free-type-vars-env
-  "Computes the set of all free type variables present in an environment.
-  An environment is a map of symbols to schemas. This function iterates through
-  each schema in the environment and collects all unique free type variables."
-  [env]
-  (reduce #(set/union %1 (free-type-vars (val %2)))
-          #{}
-          env))
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
 (defmulti get-free-s-vars-defs
   "Returns a set of free type variable definitions (maps like {:sym 'a :typeclasses [...]})
   within a given schema. Dispatch is based on the schema's :type."
-  free-type-vars-dispatch)
+  get-free-s-vars-defs-dispatch)
 
 (defmethod get-free-s-vars-defs :ground [_] #{})
 
@@ -142,6 +55,22 @@
 (defmethod get-free-s-vars-defs :scheme [{:keys [s-vars body]}]
   (set/difference (get-free-s-vars-defs body)
                   (set s-vars)))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defn free-type-vars
+  "Returns a set of free type variable symbols (e.g., 'T, 'U) within a given schema."
+  [schema]
+  (set (map :sym (get-free-s-vars-defs schema))))
+
+(defn free-type-vars-env
+  "Computes the set of all free type variables present in an environment.
+  An environment is a map of symbols to schemas. This function iterates through
+  each schema in the environment and collects all unique free type variables."
+  [env]
+  (reduce #(set/union %1 (free-type-vars (val %2)))
+          #{}
+          env))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
