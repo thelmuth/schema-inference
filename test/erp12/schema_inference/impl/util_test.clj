@@ -639,4 +639,204 @@
   (testing "unknown typeclass keyword"
     ;; If an unknown typeclass is required, it cannot be satisfied.
     (is (not (u/satisfies-all-typeclasses? {:type 'int?} #{:unknown-typeclass})))
-    (is (not (u/satisfies-all-typeclasses? {:type :s-var :sym 'a :typeclasses #{:number}} #{:unknown-typeclass})))))
+    (is (not (u/satisfies-all-typeclasses? {:type :s-var :sym 'a :typeclasses #{:number}} #{:unknown-typeclass}))))))
+
+(deftest overloaded-schema-tests
+  (let [first-overload {:type :overloaded
+                        :alternatives
+                        [{:type :scheme
+                          :s-vars [{:sym 'a}]
+                          :body {:type :=>
+                                 :input {:type :cat
+                                         :children [{:type :vector
+                                                     :child {:type :s-var :sym 'a}}]}
+                                 :output {:type :s-var :sym 'a}}}
+                         {:type :=>
+                          :input {:type :cat :children [{:type 'string?}]}
+                          :output {:type 'char?}}
+                         {:type :scheme
+                          :s-vars [{:sym 'b :typeclasses #{:number}}]
+                          :body {:type :=>
+                                 :input {:type :cat
+                                         :children [{:type :set
+                                                     :child {:type :s-var :sym 'b}}]}
+                                 :output {:type :s-var :sym 'b}}}]}
+        polymorphic-alt-1-sig {:type :=>
+                               :input {:type :cat
+                                       :children [{:type :vector
+                                                   :child {:type :s-var :sym 'a}}]}
+                               :output {:type :s-var :sym 'a}}
+        concrete-alt-2-sig {:type :=>
+                            :input {:type :cat :children [{:type 'string?}]}
+                            :output {:type 'char?}}
+        polymorphic-alt-3-sig {:type :=>
+                               :input {:type :cat
+                                       :children [{:type :set
+                                                   :child {:type :s-var :sym 'b :typeclasses #{:number}}}]}
+                               :output {:type :s-var :sym 'b :typeclasses #{:number}}}]
+
+    (testing "free-type-vars for :overloaded"
+      (is (= #{} (u/free-type-vars first-overload))) ; 'a and 'b are bound in their schemes
+      (let [overload-with-free-var
+            {:type :overloaded
+             :alternatives
+             [(update-in polymorphic-alt-1-sig [:input :children 0 :child] assoc :sym 'freeA)
+              concrete-alt-2-sig]}]
+        (is (= #{'freeA} (u/free-type-vars overload-with-free-var)))))
+
+    (testing "get-free-s-vars-defs for :overloaded"
+      (is (= #{} (u/get-free-s-vars-defs first-overload)))
+      (let [overload-with-free-s-var-def
+            {:type :overloaded
+             :alternatives
+             [(update-in polymorphic-alt-1-sig [:input :children 0 :child] merge {:sym 'freeA :typeclasses #{:tcA}})
+              concrete-alt-2-sig]}]
+        (is (= #{{:sym 'freeA :typeclasses #{:tcA}}} (u/get-free-s-vars-defs overload-with-free-s-var-def)))))
+
+    (testing "substitute for :overloaded"
+      (let [subs {'a {:type 'int?}}
+            substituted (u/substitute subs first-overload)]
+        (is (= (count (:alternatives substituted)) 3))
+        ;; Alt 1 body (scheme for (Vector a) -> a) should have 'a substituted in its instantiated body if we were to instantiate it.
+        ;; Here, substitute works on the scheme structure. If 'a was free, it would be subbed.
+        ;; Since 'a is bound in the first alternative's scheme, it won't be substituted by {'a {:type 'int?}}.
+        ;; Let's test with a free variable in one alternative.
+        (let [free-var-overload {:type :overloaded
+                                 :alternatives [{:type :=>
+                                                 :input {:type :cat :children [{:type :s-var :sym 'x}]}
+                                                 :output {:type :s-var :sym 'x}}
+                                                concrete-alt-2-sig]}
+              substituted-free (u/substitute {'x {:type 'boolean?}} free-var-overload)
+              alt1-substituted (:body (u/instantiate (first (:alternatives substituted-free))))]
+          (is (= {:type 'boolean?} (get-in alt1-substituted [:input :children 0])))
+          (is (= {:type 'boolean?} (:output alt1-substituted))))))
+
+    (testing "mgu with :overloaded"
+      (testing "Unifying overloaded with concrete function type - matches first alternative (polymorphic)"
+        (let [target-fn {:type :=>
+                         :input {:type :cat :children [{:type :vector :child {:type 'int?}}]}
+                         :output {:type 'int?}}
+              result (u/mgu first-overload target-fn)]
+          ;; Result of mgu( (instantiate first alternative's scheme), target-fn )
+          ;; (forall a. (Vector a) -> a)  unified with (Vector Int) -> Int
+          ;; Instantiated: (Vector s-1) -> s-1
+          ;; mgu( (Vector s-1) -> s-1, (Vector Int) -> Int ) => {s-1 -> Int}
+          (is (map? result))
+          (is (not (u/mgu-failure? result)))
+          (is (= 1 (count result)))
+          (let [sub-val (first (vals result))]
+            (is (= {:type 'int?} sub-val)))))
+
+      (testing "Unifying overloaded with concrete function type - matches second alternative (concrete)"
+        (let [target-fn {:type :=>
+                         :input {:type :cat :children [{:type 'string?}]}
+                         :output {:type 'char?}}
+              result (u/mgu first-overload target-fn)]
+          ;; Result of mgu( second_alternative, target-fn )
+          ;; mgu( (String -> Char), (String -> Char) ) => {}
+          (is (= {} result))))
+
+      (testing "Unifying overloaded with concrete function type - matches third alternative (polymorphic with typeclass)"
+        (let [target-fn {:type :=>
+                         :input {:type :cat :children [{:type :set :child {:type 'double?}}]}
+                         :output {:type 'double?}}
+              result (u/mgu first-overload target-fn)]
+          ;; (forall b :: Number. (Set b) -> b) unified with (Set Double) -> Double
+          ;; Instantiated: (Set s-2 :: Number) -> s-2 :: Number
+          ;; mgu( (Set s-2 :: Number) -> s-2 :: Number, (Set Double) -> Double )
+          ;; => {s-2 -> Double} (Double satisfies Number)
+          (is (map? result))
+          (is (not (u/mgu-failure? result)))
+          (is (= 1 (count result)))
+          (let [sub-val (first (vals result))]
+            (is (= {:type 'double?} sub-val)))))
+
+      (testing "Unifying overloaded with incompatible function type - fails typeclass constraint"
+        (let [target-fn {:type :=>
+                         :input {:type :cat :children [{:type :set :child {:type 'string?}}]}
+                         :output {:type 'string?}}
+              result (u/mgu first-overload target-fn)]
+          ;; Tries alt1: mgu((Vec a)->a, (Set Str)->Str) -> fails (vec vs set)
+          ;; Tries alt2: mgu(Str->Char, (Set Str)->Str) -> fails (str vs set)
+          ;; Tries alt3: mgu((Set b::Num)->b::Num, (Set Str)->Str) -> instantiates to (Set s-N::Num)->s-N::Num
+          ;;            then mgu(s-N::Num, Str) -> fails (Str does not satisfy Num)
+          (is (u/mgu-failure? result))
+          (is (= :no-matching-overload (:mgu-failure result)))))
+
+      (testing "Unifying overloaded with incompatible type (non-function)"
+        (let [target {:type 'int?}
+              result (u/mgu first-overload target)]
+          (is (u/mgu-failure? result))
+          (is (= :no-matching-overload (:mgu-failure result)))))
+
+      (testing "Unifying schema with overloaded schema (symmetric)"
+        (let [target-fn {:type :=>
+                         :input {:type :cat :children [{:type 'string?}]}
+                         :output {:type 'char?}}
+              result (u/mgu target-fn first-overload)]
+          (is (= {} result))))
+
+      (testing "Unifying two overloaded schemas - currently unsupported"
+        (let [another-overload {:type :overloaded :alternatives [concrete-alt-2-sig]}
+              result (u/mgu first-overload another-overload)]
+          (is (u/mgu-failure? result))
+          (is (= :overloaded-vs-overloaded (:mgu-failure result)))))
+
+      (testing "Unifying s-var with overloaded schema - should try to bind s-var to each alternative"
+        ;; This case is tricky. The current mgu* [:s-var :_] dispatches to bind-var.
+        ;; bind-var then might see :overloaded as the schema.
+        ;; A simple bind-var would just do {'sv first-overload}.
+        ;; However, if the s-var has typeclasses, it should check against alternatives.
+        ;; The current [:overloaded :_] tries to mgu each alternative with the non-overloaded schema.
+        ;; So, mgu(s-var, overloaded-schema) will call mgu*(overloaded-schema, s-var).
+        ;; Then, it will loop through alternatives of overloaded-schema, instantiating them,
+        ;; and calling mgu(inst-alt, s-var).
+        ;; This seems like a reasonable path.
+        (let [s-var-schema {:type :s-var :sym 'x}
+              result (u/mgu s-var-schema first-overload)
+              ;; It should pick the first alternative: (instantiate scheme1)
+              ;; inst-scheme1 = (Vector s1) -> s1
+              ;; mgu(inst-scheme1, x) => {x -> inst-scheme1}
+              expected-bound-schema (u/instantiate (first (:alternatives first-overload)))]
+          (is (= {(:sym s-var-schema) expected-bound-schema} result)))
+
+        (let [s-var-tc-schema {:type :s-var :sym 'y :typeclasses #{:string-like}} ; Assume 'string-like' is a typeclass only 'string?' satisfies
+              ;; For this test, let's temporarily imagine 'string?' has a 'string-like' typeclass
+              ;; and char? does not.
+              ;; And (Vector a) -> a does not.
+              ;; The second alternative of first-overload is String -> Char.
+              ;; mgu*(first-overload, s-var-tc-schema)
+              ;; alt1: mgu((Vec s1)->s1, y::string-like) => y binds to (Vec s1)->s1. Check satisfies... (Vec s1)->s1 is not string-like. Fail.
+              ;; alt2: mgu(String->Char, y::string-like) => y binds to String->Char. Check satisfies... String->Char is not string-like. Fail.
+              ;; alt3: mgu((Set s2::Num)->s2::Num, y::string-like) => y binds to (Set s2::Num)->s2::Num. Check satisfies... not string-like. Fail.
+              ;;
+              ;; This implies satisfies-all-typeclasses? needs to handle function types if we want this to work.
+              ;; For now, let's assume typeclasses on s-vars usually constrain them to concrete-like things or other s-vars.
+              ;; If 'y' must be 'string-like', and 'string-like' implies it must be a ground type 'string?',
+              ;; then mgu(String->Char, y::string-like) would fail because String->Char is not 'string?'.
+              ;; Let's simplify: s-var expects a function.
+              s-var-fn-tc {:type :s-var :sym 'z :typeclasses #{:callable}} ; :callable is in erp12.schema-inference.impl.typeclasses for :=>
+              result-fn-tc (u/mgu s-var-fn-tc first-overload)
+              expected-bound-fn-schema (u/instantiate (first (:alternatives first-overload)))]
+            (is (= {(:sym s-var-fn-tc) expected-bound-fn-schema} result-fn-tc))))
+
+      (testing "Unifying overloaded schema where an alternative requires specific typeclass"
+        ;; first-overload alt3: (Set b::Number) -> b::Number
+        ;; Target: (Set Int) -> Int. Int satisfies Number.
+        (let [target-fn {:type :=> :input {:type :cat :children [{:type :set :child {:type 'int?}}]} :output {:type 'int?}}
+              result (u/mgu first-overload target-fn)]
+          (is (not (u/mgu-failure? result)))
+          (is (= {:type 'int?} (first (vals result))))) ; s_fresh_from_b -> int?
+
+        ;; Target: (Set String) -> String. String does NOT satisfy Number.
+        (let [target-fn-str {:type :=> :input {:type :cat :children [{:type :set :child {:type 'string?}}]} :output {:type 'string?}}
+              result-str (u/mgu first-overload target-fn-str)]
+          ;; Alt1 (Vec a -> a) vs (Set Str -> Str): fails (Vec vs Set)
+          ;; Alt2 (Str -> Char) vs (Set Str -> Str): fails (Str vs Set Str)
+          ;; Alt3 (Set b::Num -> b::Num) vs (Set Str -> Str):
+          ;;   Instantiated: (Set sN::Num -> sN::Num)
+          ;;   MGU with (Set Str -> Str):
+          ;;     Inputs: mgu((Set sN::Num), (Set Str)) -> mgu(sN::Num, Str). Bind sN to Str. Check Str satisfies Num -> FAIL.
+          ;; So, this specific alternative fails. Since others also fail, it's :no-matching-overload
+          (is (u/mgu-failure? result-str))
+          (is (= :no-matching-overload (:mgu-failure result-str))))))))
