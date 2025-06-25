@@ -17,8 +17,10 @@
   [s]
   (cond (ground? s) :ground
         (map? (:type s)) :type-constructor
-        (= (:type s) :overloaded) :overloaded
+        (= (:type s) :overloaded) :overloaded ;; TMH unnecessary
         :else (:type s)))
+
+;; TMH remove "defs"
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -87,7 +89,7 @@
   The dispatch is based on the schema's :type. If the schema is a ground type,
   it dispatches on :ground."
   (fn [_ x] 
-    (cond (ground? x) :ground 
+    (cond (ground? x) :ground  ;; call other dispatch function to simplify?
           (map? (:type x)) :type-constructor
           :else (:type x))))
 
@@ -302,11 +304,13 @@
     (and (= (:type a) :maybe)
          (= (:type b) :maybe))
     [:maybe :maybe]
-    
+
+    (= (:type a) :overloaded) [:overloaded :_]
+    (= (:type b) :overloaded) [:_ :overloaded]
+
     (= (:type a) :s-var) [:s-var :_]
     (= (:type b) :s-var) [:_ :s-var]
-     (= (:type a) :overloaded) [:overloaded :_]
-     (= (:type b) :overloaded) [:_ :overloaded]
+
     :else [(:type a) (:type b)]))
 
 (defn mgu-failure?
@@ -387,24 +391,18 @@
   ;; Unify an overloaded schema `a` with schema `b`.
   ;; Try each alternative of `a` with `b`.
   [a b]
-  (if (= (:type b) :overloaded)
-    ;; Both are overloaded, which is complex. For now, indicate failure or specific handling.
-    {:mgu-failure :overloaded-vs-overloaded
-     :schema-1    a
-     :schema-2    b
-     :message     "Unification between two :overloaded schemas is not yet supported directly."}
-    (loop [alternatives (:alternatives a)]
-      (if (empty? alternatives)
-        {:mgu-failure :no-matching-overload
-         :schema-1    a
-         :schema-2    b}
-        (let [alt (first alternatives)
-              ;; Instantiate if the alternative is a scheme
-              inst-alt (instantiate alt)
-              result (mgu inst-alt b)]
-          (if (mgu-failure? result)
-            (recur (rest alternatives))
-            result))))))
+  (loop [alternatives (:alternatives a)]
+    (if (empty? alternatives)
+      {:mgu-failure :no-matching-overload
+       :schema-1    a
+       :schema-2    b}
+      (let [alt (first alternatives)
+            ;; Instantiate if the alternative is a scheme
+            inst-alt (instantiate alt)
+            result (mgu inst-alt b)]
+        (if (mgu-failure? result)
+          (recur (rest alternatives))
+          result)))))
 
 (defmethod mgu* [:_ :overloaded]
   ;; Symmetric to [:overloaded :_]
