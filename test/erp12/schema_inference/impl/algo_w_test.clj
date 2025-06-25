@@ -138,18 +138,18 @@
                              :value {:type 'int?}}])))
 
   (let [{::a/keys [subs schema failure]}
-            (algo-w (ana/analyze '(fn [] (count {1 10 2 20 3 30 4 40}))) test-env)
-            collection-type (-> subs vals)]
-            (is (nil? failure))
-            (is (= schema {:type :=>
-                           :input {:type :cat
-                                   :children []}
-                           :output {:type 'int?}}))
-            (is (= (count subs) 2))
-            (is (= collection-type [{:type 'int?}
-                                    {:type :map-of
-                                     :key {:type 'int?}
-                                     :value {:type 'int?}}])))
+        (algo-w (ana/analyze '(fn [] (count {1 10 2 20 3 30 4 40}))) test-env)
+        collection-type (-> subs vals)]
+    (is (nil? failure))
+    (is (= schema {:type :=>
+                   :input {:type :cat
+                           :children []}
+                   :output {:type 'int?}}))
+    (is (= (count subs) 2))
+    (is (= collection-type [{:type 'int?}
+                            {:type :map-of
+                             :key {:type 'int?}
+                             :value {:type 'int?}}])))
 
   (let [{::a/keys [failure]}
         (algo-w (ana/analyze '(fn [] (count \g))) test-env)]
@@ -176,7 +176,7 @@
       (is (symbol? (-> schema :input :children first :sym)))
       (is (symbol? (-> schema :output :sym)))
       ;; make sure input and output :sym are the same s-var
-      (is (= (-> schema :input :children first :sym) (-> schema :output :sym))) 
+      (is (= (-> schema :input :children first :sym) (-> schema :output :sym)))
       (is (= (count subs) 4)))
     (let [{::a/keys [subs schema failure]}
           (algo-w (ana/analyze '(fn [] (inc 1))) test-env)]
@@ -452,82 +452,82 @@
                    (is (= {:type 'string?} (:schema unif-failure)))
                    (is (= #{:number} (:missing-typeclasses unif-failure))))))))
 
-    (testing "Let binding, generalization, and application with pre-defined scheme"
-      (let [id-num-comparable-schema {:type   :scheme
-                                      :s-vars [{:sym 'a :typeclasses #{:number :comparable}}]
-                                      :body   {:type   :=>
-                                               :input  {:type     :cat
-                                                        :children [{:type :s-var :sym 'a}]}
-                                               :output {:type :s-var :sym 'a}}}
-            ;; AST for (let [f id-num-comparable] f)
-            let-f-ast {:op :LET
-                       :bindings [{:name 'f :init {:op :VAR :sym 'id-nc}}]
-                       :body {:op :VAR :sym 'f}}
-            env {'id-nc id-num-comparable-schema}
-            inferred-f-type (schema-inf/infer-schema let-f-ast env)]
+      (testing "Let binding, generalization, and application with pre-defined scheme"
+        (let [id-num-comparable-schema {:type   :scheme
+                                        :s-vars [{:sym 'a :typeclasses #{:number :comparable}}]
+                                        :body   {:type   :=>
+                                                 :input  {:type     :cat
+                                                          :children [{:type :s-var :sym 'a}]}
+                                                 :output {:type :s-var :sym 'a}}}
+              ;; AST for (let [f id-num-comparable] f)
+              let-f-ast {:op :LET
+                         :bindings [{:name 'f :init {:op :VAR :sym 'id-nc}}]
+                         :body {:op :VAR :sym 'f}}
+              env {'id-nc id-num-comparable-schema}
+              inferred-f-type (schema-inf/infer-schema let-f-ast env)]
 
-        (is (= :=> (:type inferred-f-type)))
-        ;; for input
-        (let [typeclasses (-> inferred-f-type :input :children first :typeclasses)]
-          ;; The symbol might be different due to generalization, check only typeclasses
-          (is (= #{:number :comparable} typeclasses)))
-        (is (= :cat (-> inferred-f-type :input :type)))
-        (is (= :s-var (-> inferred-f-type :input :children first :type)))
-        ;; for output
-        (let [typeclasses (-> inferred-f-type :output :typeclasses)]
-          ;; The symbol might be different due to generalization, check only typeclasses
-          (is (= #{:number :comparable} typeclasses)))
+          (is (= :=> (:type inferred-f-type)))
+          ;; for input
+          (let [typeclasses (-> inferred-f-type :input :children first :typeclasses)]
+            ;; The symbol might be different due to generalization, check only typeclasses
+            (is (= #{:number :comparable} typeclasses)))
+          (is (= :cat (-> inferred-f-type :input :type)))
+          (is (= :s-var (-> inferred-f-type :input :children first :type)))
+          ;; for output
+          (let [typeclasses (-> inferred-f-type :output :typeclasses)]
+            ;; The symbol might be different due to generalization, check only typeclasses
+            (is (= #{:number :comparable} typeclasses)))
 
-        ;; Test application of f (which is id-num-comparable)
-        (let [app-env (assoc {} 'f inferred-f-type)
-              app-int-ast {:op :APP :fn {:op :VAR :sym 'f} :args [{:op :LIT :type :int :val 1}]}
-              app-double-ast {:op :APP :fn {:op :VAR :sym 'f} :args [{:op :LIT :type :double :val 1.5}]}
-              app-bool-ast {:op :APP :fn {:op :VAR :sym 'f} :args [{:op :LIT :type :boolean :val true}]}
-              app-vec-ast {:op :APP :fn {:op :VAR :sym 'f} :args [{:op :LIT :type :vector :val []}]}]
+          ;; Test application of f (which is id-num-comparable)
+          (let [app-env (assoc {} 'f inferred-f-type)
+                app-int-ast {:op :APP :fn {:op :VAR :sym 'f} :args [{:op :LIT :type :int :val 1}]}
+                app-double-ast {:op :APP :fn {:op :VAR :sym 'f} :args [{:op :LIT :type :double :val 1.5}]}
+                app-bool-ast {:op :APP :fn {:op :VAR :sym 'f} :args [{:op :LIT :type :boolean :val true}]}
+                app-vec-ast {:op :APP :fn {:op :VAR :sym 'f} :args [{:op :LIT :type :vector :val []}]}]
 
-          (is (= {:type 'int? :typeclasses #{:comparable :number}} 
-                 (schema-inf/infer-schema app-int-ast app-env)))
-          (is (= {:type 'double? :typeclasses #{:comparable :number}} 
-                 (schema-inf/infer-schema app-double-ast app-env)))
+            (is (= {:type 'int? :typeclasses #{:comparable :number}}
+                   (schema-inf/infer-schema app-int-ast app-env)))
+            (is (= {:type 'double? :typeclasses #{:comparable :number}}
+                   (schema-inf/infer-schema app-double-ast app-env)))
 
-          ;; This should throw exception because booleans aren't in :number typeclass
-          (is (thrown-with-msg?
-               clojure.lang.ExceptionInfo
-               #"Schema inference failure."
-               (schema-inf/infer-schema app-bool-ast app-env)))
+            ;; This should throw exception because booleans aren't in :number typeclass
+            (is (thrown-with-msg?
+                 clojure.lang.ExceptionInfo
+                 #"Schema inference failure."
+                 (schema-inf/infer-schema app-bool-ast app-env)))
 
-          (is (thrown-with-msg?
-               clojure.lang.ExceptionInfo
-               #"Schema inference failure."
-               (schema-inf/infer-schema app-vec-ast app-env)))
-          (try (schema-inf/infer-schema app-vec-ast app-env)
-               (catch clojure.lang.ExceptionInfo e
-                 (let [ex-data (ex-data e)
-                       unif-failure (get-in ex-data [::a/failure :unification-failure])]
-                   (is (= :typeclass-mismatch (:mgu-failure unif-failure)))
-                   (is (= #{:number :comparable} (:typeclasses (:s-var unif-failure))))
-                   (is (= {:type :vector} (select-keys (:schema unif-failure) [:type])))))))))
+            (is (thrown-with-msg?
+                 clojure.lang.ExceptionInfo
+                 #"Schema inference failure."
+                 (schema-inf/infer-schema app-vec-ast app-env)))
+            (try (schema-inf/infer-schema app-vec-ast app-env)
+                 (catch clojure.lang.ExceptionInfo e
+                   (let [ex-data (ex-data e)
+                         unif-failure (get-in ex-data [::a/failure :unification-failure])]
+                     (is (= :typeclass-mismatch (:mgu-failure unif-failure)))
+                     (is (= #{:number :comparable} (:typeclasses (:s-var unif-failure))))
+                     (is (= {:type :vector} (select-keys (:schema unif-failure) [:type])))))))))
 
-    (testing "Error reporting for typeclass mismatch in infer-schema"
-      (let [ast {:op :APP
-                  :fn {:op :VAR :sym 'id-num}
-                  :args [{:op :LIT :type :string :val "foo"}]}
-            env {'id-num {:type   :scheme
-                          :s-vars [{:sym 'a :typeclasses #{:number}}]
-                          :body   {:type   :=>
-                                   :input  {:type     :cat
-                                            :children [{:type :s-var :sym 'a}]}
-                                   :output {:type :s-var :sym 'a}}}}]
-        (try
-          (schema-inf/infer-schema ast env)
-          (is false "Should have thrown an exception") ; Should not reach here
-          (catch clojure.lang.ExceptionInfo e
-            (let [ex-data (ex-data e)
-                  failure-data (::a/failure ex-data)
-                  unification-failure-data (:unification-failure failure-data)]
-              (is (= :typeclass-mismatch (:mgu-failure unification-failure-data)))
-              ;; The symbol 'a might be gensym'd, so we check typeclasses and type only for s-var
-              (is (= {:type :s-var, :typeclasses #{:number}}
-                     (select-keys (:s-var unification-failure-data) [:type :typeclasses])))
-              (is (= {:type 'string?} (:schema unification-failure-data)))
-              (is (= #{:number} (:missing-typeclasses unification-failure-data)))))))))))
+      (testing "Error reporting for typeclass mismatch in infer-schema"
+        (let [ast {:op :APP
+                   :fn {:op :VAR :sym 'id-num}
+                   :args [{:op :LIT :type :string :val "foo"}]}
+              env {'id-num {:type   :scheme
+                            :s-vars [{:sym 'a :typeclasses #{:number}}]
+                            :body   {:type   :=>
+                                     :input  {:type     :cat
+                                              :children [{:type :s-var :sym 'a}]}
+                                     :output {:type :s-var :sym 'a}}}}]
+          (try
+            (schema-inf/infer-schema ast env)
+            (is false "Should have thrown an exception") ; Should not reach here
+            (catch clojure.lang.ExceptionInfo e
+              (let [ex-data (ex-data e)
+                    failure-data (::a/failure ex-data)
+                    unification-failure-data (:unification-failure failure-data)]
+                (is (= :typeclass-mismatch (:mgu-failure unification-failure-data)))
+                ;; The symbol 'a might be gensym'd, so we check typeclasses and type only for s-var
+                (is (= {:type :s-var, :typeclasses #{:number}}
+                       (select-keys (:s-var unification-failure-data) [:type :typeclasses])))
+                (is (= {:type 'string?} (:schema unification-failure-data)))
+                (is (= #{:number} (:missing-typeclasses unification-failure-data)))))))))))
