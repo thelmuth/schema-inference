@@ -32,7 +32,19 @@
                                      :children [{:type  {:type :s-var :sym 'c}
                                                       ;:child {:type :s-var :sym 'a}
                                                  }]},
-                             :output {:type 'int?}}}]
+                             :output {:type 'int?}}}
+        first-type {:type :overloaded
+                    :alternatives
+                    [{:type :scheme
+                      :s-vars [{:sym 'a}]
+                      :body {:type :=>
+                             :input {:type :cat
+                                     :children [{:type :vector
+                                                 :child {:type :s-var :sym 'a}}]}
+                             :output {:type :s-var :sym 'a}}}
+                     {:type :=>
+                      :input {:type :cat :children [{:type 'string?}]}
+                      :output {:type 'char?}}]}]
     {'clojure.lang.Numbers/inc
      inc-type
 
@@ -50,6 +62,10 @@
 
      'clojure.lang.RT/count
      count-type
+
+
+     'clojure.core/first
+     first-type
 
      'clojure.core/if
      {:type   :scheme
@@ -420,6 +436,74 @@
     (is (= #{:number} (-> schema :output :typeclasses)))
     (is (symbol? (-> schema :output :sym)))
     (is (= (count subs) 0))))
+
+(deftest algo-w-overloaded-function-application-test
+  (testing "Applying 'first' (overloaded function)"
+    (testing "Matches first alternative: (first [1 2 3]) -> int?"
+      (let [ast (ana/analyze '(first [1 2 3]))
+            {::a/keys [subs schema failure]} (algo-w ast test-env)]
+        (is (nil? failure) (str "Failure: " failure))
+        (is (= {:type 'int?} schema) (str "Subs: " subs))))
+
+    (testing "Matches first alternative: (first [true false]) -> boolean?"
+      (let [ast (ana/analyze '(first [true false]))
+            {::a/keys [subs schema failure]} (algo-w ast test-env)]
+        (is (nil? failure) (str "Failure: " failure))
+        (is (= {:type 'boolean?} schema) (str "Subs: " subs))))
+
+    (testing "Matches second alternative: (first \"abc\") -> char?"
+      (let [ast (ana/analyze '(first "abc"))
+            {::a/keys [subs schema failure]} (algo-w ast test-env)]
+        (is (nil? failure) (str "Failure: " failure))
+        (is (= {:type 'char?} schema) (str "Subs: " subs))))
+    
+    (testing "Testing with a nested vector"
+      (let [ast (ana/analyze '(first [["Owen" "Isabelle" "Sydney"] ["Tom" "Sarah" "Darren"]]))
+            {::a/keys [subs schema failure]} (algo-w ast test-env)]
+        (is (nil? failure) (str "Failure: " failure))
+        (is (= {:type :vector :child {:type 'string?}} schema) (str "Subs: " subs))))
+    
+    (testing "Testing with a nested vector again"
+      (let [ast (ana/analyze '(first (first [["Owen" "Isabelle" "Sydney"] ["Tom" "Sarah" "Darren"]])))
+            {::a/keys [subs schema failure]} (algo-w ast test-env)]
+        (is (nil? failure) (str "Failure: " failure))
+        (is (= {:type 'string?} schema) (str "Subs: " subs))))
+    
+    (testing "Testing with a nested vector again again"
+      (let [ast (ana/analyze '(first (first (first [["Owen" "Isabelle" "Sydney"] ["Tom" "Sarah" "Darren"]]))))
+            {::a/keys [subs schema failure]} (algo-w ast test-env)]
+        (is (nil? failure) (str "Failure: " failure))
+        (is (= {:type 'char?} schema) (str "Subs: " subs))))
+
+    (testing "No matching alternative."
+      (let [ast (ana/analyze '(first #{1 2 3}))
+            {::a/keys [subs schema failure]} (algo-w ast test-env)]
+        (is (nil? schema))
+        (is (nil? subs))
+        (is (some? failure))
+        (is (= :no-matching-overload
+               (get-in failure [:unification-failure :mgu-failure])))))
+
+    (testing "No matching alternative: (first {:a 1}) -> failure"
+      (let [ast (ana/analyze '(first {:a 1}))
+            {::a/keys [subs schema failure]} (algo-w ast test-env)]
+        (is (nil? schema))
+        (is (nil? subs))
+        (is (some? failure))
+        (is (= :no-matching-overload
+               (get-in failure [:unification-failure :mgu-failure]))))) 
+
+    (testing "Polymorphic choice based on argument type"
+      (let [ast (ana/analyze '(let [f first] (f [10])))
+            {::a/keys [schema failure]} (algo-w ast test-env)]
+        (is (nil? failure) (str "Failure for [10]: " failure))
+        (is (= {:type 'int?} schema)))
+
+      (let [ast (ana/analyze '(let [f first] (f ["hello"])))
+            {::a/keys [schema failure]} (algo-w ast test-env)]
+        (is (nil? failure) (str "Failure for [\"hello\"]: " failure))
+        (is (= {:type 'string?} schema))))))
+
 
 (deftest infer-schema-typeclass-tests
   (testing "api/infer-schema tests for typeclasses"

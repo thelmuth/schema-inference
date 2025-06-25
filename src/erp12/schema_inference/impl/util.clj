@@ -13,7 +13,9 @@
        (or (ident? type) (class? type))
        (not= type :s-var)))
 
-(defn- get-free-s-vars-defs-dispatch
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defn- get-free-s-vars-dispatch
   [s]
   (cond (ground? s) :ground
         (map? (:type s)) :type-constructor
@@ -21,47 +23,51 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defmulti get-free-s-vars-defs
+(defmulti get-free-s-vars
   "Returns a set of free type variable definitions (maps like {:sym 'a :typeclasses [...]})
   within a given schema. Dispatch is based on the schema's :type."
-  get-free-s-vars-defs-dispatch)
+  get-free-s-vars-dispatch)
 
-(defmethod get-free-s-vars-defs :ground [_] #{})
+(defmethod get-free-s-vars :ground [_] #{})
 
-(defmethod get-free-s-vars-defs :type-constructor
-  [{:keys [type]}] (get-free-s-vars-defs type))
+(defmethod get-free-s-vars :type-constructor
+  [{:keys [type]}] (get-free-s-vars type))
 
-(defn- get-free-s-vars-defs-ctor1 [{:keys [child]}] (get-free-s-vars-defs child))
+(defn- get-free-s-vars-ctor1 [{:keys [child]}] (get-free-s-vars child))
 
-(defmethod get-free-s-vars-defs :vector [schema] (get-free-s-vars-defs-ctor1 schema))
-(defmethod get-free-s-vars-defs :set [schema] (get-free-s-vars-defs-ctor1 schema))
-(defmethod get-free-s-vars-defs :sequential [schema] (get-free-s-vars-defs-ctor1 schema))
-(defmethod get-free-s-vars-defs :maybe [schema] (get-free-s-vars-defs-ctor1 schema))
+(defmethod get-free-s-vars :vector [schema] (get-free-s-vars-ctor1 schema))
+(defmethod get-free-s-vars :set [schema] (get-free-s-vars-ctor1 schema))
+(defmethod get-free-s-vars :sequential [schema] (get-free-s-vars-ctor1 schema))
+(defmethod get-free-s-vars :maybe [schema] (get-free-s-vars-ctor1 schema))
 
-(defn- get-free-s-vars-defs-ctorN [{:keys [children]}]
-  (reduce #(set/union %1 (get-free-s-vars-defs %2)) #{} children))
+(defn- get-free-s-vars-ctorN [{:keys [children]}]
+  (reduce #(set/union %1 (get-free-s-vars %2)) #{} children))
 
-(defmethod get-free-s-vars-defs :tuple [schema] (get-free-s-vars-defs-ctorN schema))
-(defmethod get-free-s-vars-defs :cat [schema] (get-free-s-vars-defs-ctorN schema))
+(defmethod get-free-s-vars :tuple [schema] (get-free-s-vars-ctorN schema))
+(defmethod get-free-s-vars :cat [schema] (get-free-s-vars-ctorN schema))
 
-(defmethod get-free-s-vars-defs :map-of [{:keys [key value]}]
-  (set/union (get-free-s-vars-defs key) (get-free-s-vars-defs value)))
+(defmethod get-free-s-vars :map-of [{:keys [key value]}]
+  (set/union (get-free-s-vars key) (get-free-s-vars value)))
 
-(defmethod get-free-s-vars-defs :=> [{:keys [input output]}]
-  (set/union (get-free-s-vars-defs input) (get-free-s-vars-defs output)))
+(defmethod get-free-s-vars :=> [{:keys [input output]}]
+  (set/union (get-free-s-vars input) (get-free-s-vars output)))
 
-(defmethod get-free-s-vars-defs :s-var [s-var-def] #{(dissoc s-var-def :type)})
+(defmethod get-free-s-vars :s-var [s-var-def] #{(dissoc s-var-def :type)})
 
-(defmethod get-free-s-vars-defs :scheme [{:keys [s-vars body]}]
-  (set/difference (get-free-s-vars-defs body)
+(defmethod get-free-s-vars :scheme [{:keys [s-vars body]}]
+  (set/difference (get-free-s-vars body)
                   (set s-vars)))
+
+(defmethod get-free-s-vars :overloaded
+  [{:keys [alternatives]}]
+  (reduce #(set/union %1 (get-free-s-vars %2)) #{} alternatives))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defn free-type-vars
   "Returns a set of free type variable symbols (e.g., 'T, 'U) within a given schema."
   [schema]
-  (set (map :sym (get-free-s-vars-defs schema))))
+  (set (map :sym (get-free-s-vars schema))))
 
 (defn free-type-vars-env
   "Computes the set of all free type variables present in an environment.
@@ -82,7 +88,7 @@
   The dispatch is based on the schema's :type. If the schema is a ground type,
   it dispatches on :ground."
   (fn [_ x] 
-    (cond (ground? x) :ground 
+    (cond (ground? x) :ground  ;; call other dispatch function to simplify?
           (map? (:type x)) :type-constructor
           :else (:type x))))
 
@@ -169,6 +175,11 @@
     :body (substitute (apply dissoc subs (map :sym s-vars))
                       body)))
 
+(defmethod substitute :overloaded
+  ;; "Substitutes type variables in all alternatives of an :overloaded schema."
+  [subs {:keys [alternatives] :as schema}]
+  (assoc schema :alternatives (mapv #(substitute subs %) alternatives)))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defn substitute-env
@@ -231,7 +242,7 @@
   [env schema]
   (let [schema-instance (instantiate schema) ; avoid calling instantiate on already instantiated schema
         env-free-vars-syms (free-type-vars-env env)
-        schema-free-s-vars-defs (get-free-s-vars-defs schema-instance)
+        schema-free-s-vars-defs (get-free-s-vars schema-instance)
         s-var-defs-to-generalize (filter #(not (contains? env-free-vars-syms (:sym %)))
                                          schema-free-s-vars-defs)
         sorted-s-var-defs (sort-by :sym (vec s-var-defs-to-generalize))]
@@ -292,9 +303,13 @@
     (and (= (:type a) :maybe)
          (= (:type b) :maybe))
     [:maybe :maybe]
-    
+
+    (= (:type a) :overloaded) [:overloaded :_]
+    (= (:type b) :overloaded) [:_ :overloaded]
+
     (= (:type a) :s-var) [:s-var :_]
     (= (:type b) :s-var) [:_ :s-var]
+
     :else [(:type a) (:type b)]))
 
 (defn mgu-failure?
@@ -370,6 +385,28 @@
 (defmethod mgu* [:_ :s-var]
   ;; "Unifies schema `a` with a schema variable `b`."
   [a b] (bind-var b a))
+
+(defmethod mgu* [:overloaded :_]
+  ;; Unify an overloaded schema `a` with schema `b`.
+  ;; Try each alternative of `a` with `b`.
+  [a b]
+  (loop [alternatives (:alternatives a)]
+    (if (empty? alternatives)
+      {:mgu-failure :no-matching-overload
+       :schema-1    a
+       :schema-2    b}
+      (let [alt (first alternatives)
+            ;; Instantiate if the alternative is a scheme
+            inst-alt (instantiate alt)
+            result (mgu inst-alt b)]
+        (if (mgu-failure? result)
+          (recur (rest alternatives))
+          result)))))
+
+(defmethod mgu* [:_ :overloaded]
+  ;; Symmetric to [:overloaded :_]
+  [a b]
+  (mgu* b a))
 
 (defn- mgu*-schema-ctor1
   [{a-type :type a-child :child :as a} {b-type :type b-child :child :as b}]
