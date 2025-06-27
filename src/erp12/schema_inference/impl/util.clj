@@ -224,6 +224,10 @@
         subs (zipmap (map :sym s-vars) fresh-vars)]
     (substitute subs body)))
 
+(defmethod instantiate :overloaded
+  [overload]
+  (update overload :alternatives #(mapv instantiate %)))
+
 (defmethod instantiate :default
   ;; "Default case for instantiate: if the schema is not a type scheme,
   ;; it is returned unchanged as there are no quantified variables to instantiate."
