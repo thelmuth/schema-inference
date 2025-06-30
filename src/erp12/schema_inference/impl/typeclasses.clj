@@ -7,6 +7,8 @@
    :callable   #{:=> :map-of :set}
    :indexable  #{:vector 'string?}
    :intable    #{'double? 'char?}
+   :keyable    #{:set :map-of}
+   :stringable #{'string? 'char?}
    }
   
   ;;;;;;; Maybe add in future?
