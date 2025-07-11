@@ -54,6 +54,8 @@
 
 (defmethod get-free-s-vars :s-var [s-var-def] #{(dissoc s-var-def :type)})
 
+(defmethod get-free-s-vars :t-var [t-var] #{(dissoc t-var :type)})
+
 (defmethod get-free-s-vars :scheme [{:keys [s-vars body]}]
   (set/difference (get-free-s-vars body)
                   (set s-vars)))
@@ -73,7 +75,7 @@
   "Computes the set of all free type variables present in an environment.
   An environment is a map of symbols to schemas. This function iterates through
   each schema in the environment and collects all unique free type variables."
-  [env]
+  [env] 
   (reduce #(set/union %1 (free-type-vars (val %2)))
           #{}
           env))
@@ -81,7 +83,6 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ;; @todo Consider generic substitution function (ie. clojure.walk/postwalk-replace) that replaces more than s-vars.
-
 (defmulti substitute
   "Recursively replaces type variable symbols (e.g., 'T) in a given schema
   with their corresponding schemas from a substitution map (`subs`).
@@ -128,6 +129,13 @@
         (seq merged-tcs) (assoc :typeclasses merged-tcs)))
     ;; If replacement is nil, just return s-var without changes
     s-var))
+
+(defmethod substitute :t-var
+  [subs t-var]
+  (if-let [replacement (get subs (:sym t-var))]
+    replacement
+    ;; If replacement is nil, just return s-var without changes
+    t-var))
 
 (defn- substitute-ctor1
   [subs {:keys [child] :as schema}]
@@ -300,6 +308,7 @@
     (:type schema)
     schema))
 
+;; T-VAR, add to mgu dispatch? and mgu, maybe
 (defn- mgu*-dispatch
   "Dispatch function for mgu. Dispatch is only on the types of the first two schemas a and b."
   [a b]
@@ -347,6 +356,7 @@
       result
       (result-fn result))))
 
+;; T-VAR, add to bind-var, maybe
 (defn- bind-var
   "Attempts to bind schematic variable s-var to schema.
   Performs occurs check and typeclass compatibility check (using global tc/typeclasses)."
