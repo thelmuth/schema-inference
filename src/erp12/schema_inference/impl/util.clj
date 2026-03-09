@@ -276,7 +276,7 @@
     (let [schema-type (:type schema)]
       (cond
         ;; Case 1: The schema being checked is another schematic variable.
-        (= schema-type :s-var)
+        (contains? #{:s-var :t-var} schema-type)
         (let [svar-to-check-typeclasses (set (:typeclasses schema))]
           (if (empty? svar-to-check-typeclasses)
             true ; The s-var being checked is unconstrained, so it satisfies any requirement.
